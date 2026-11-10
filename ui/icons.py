@@ -11,10 +11,13 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from dungeon import config
+
+_TINT_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 # 项目根目录。不能用相对路径或 CWD：run.bat 双击启动与 IDE 启动的工作目录不同
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,11 +32,17 @@ class IconManifestError(Exception):
 
 @dataclass(frozen=True)
 class IconSpec:
-    """清单里的一条图标声明。"""
+    """清单里的一条图标声明。
+
+    ``tint`` 是可选的颜色（``#rrggbb``）。game-icons 下载的是纯白剪影，
+    加载时乘以这个颜色就能得到"红色怪物 / 青色玩家 / 金色道具"，
+    不必为每种颜色单独存一份素材。
+    """
 
     key: str
     file: str
     label: str = ""
+    tint: str = ""
 
     @property
     def display_name(self) -> str:
@@ -125,10 +134,13 @@ def load_manifest(path: Path | str | None = None) -> IconManifest:
             if file_name is None:
                 continue
             label = item.get("label")
+            raw_tint = item.get("tint")
+            tint = raw_tint if isinstance(raw_tint, str) and _TINT_PATTERN.match(raw_tint) else ""
             entries[key.strip()] = IconSpec(
                 key=key.strip(),
                 file=file_name,
                 label=label.strip() if isinstance(label, str) else "",
+                tint=tint,
             )
 
     return IconManifest(entries=entries, base_dir=base_dir)

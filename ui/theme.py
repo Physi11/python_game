@@ -43,6 +43,13 @@ HP_RED = "#e5484d"
 EXP_BLUE = "#5aa9e6"
 MP_PURPLE = "#a78bfa"
 
+# 战斗高亮：蓝=玩家瞄准，红=敌人锁定，黄=自己蓄力
+AIM = "#4a9eff"
+AIM_BAD = "#7a8699"
+THREAT = "#e5484d"
+THREAT_TEXT = "#ffb3b5"
+CHARGE = "#e8c45a"
+
 # 实体
 C_PLAYER = "#7ff0e0"
 C_MONSTER = "#e05a5a"

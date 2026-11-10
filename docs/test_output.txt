@@ -95,6 +95,8 @@ test_missing_file_returns_empty (test_icons.TestManifestLoading.test_missing_fil
 清单不存在时返回空表，游戏照常运行（全部回退字符）。 ... ok
 test_shipped_manifest_is_valid (test_icons.TestManifestLoading.test_shipped_manifest_is_valid)
 项目自带的那份清单必须能正常解析，且每条都是相对 .png。 ... ok
+test_tint_is_parsed_and_validated (test_icons.TestManifestLoading.test_tint_is_parsed_and_validated)
+tint 必须是 #rrggbb，写错就忽略而不是让整条图标失效。 ... ok
 test_unsupported_version_rejected (test_icons.TestManifestLoading.test_unsupported_version_rejected) ... ok
 test_corrupted_json_raises_and_backs_up (test_save.TestSaveAbnormal.test_corrupted_json_raises_and_backs_up) ... ok
 test_invalid_slot_number (test_save.TestSaveAbnormal.test_invalid_slot_number) ... ok
@@ -108,8 +110,35 @@ test_rng_state_reproducible (test_save.TestSaveRoundtrip.test_rng_state_reproduc
 读档后的随机序列必须与存档时完全一致。 ... ok
 test_roundtrip_keeps_state (test_save.TestSaveRoundtrip.test_roundtrip_keeps_state) ... ok
 test_save_then_delete (test_save.TestSaveRoundtrip.test_save_then_delete) ... ok
+test_charge_is_non_decreasing_with_damage (test_tactics.TestEnemyDesign.test_charge_is_non_decreasing_with_damage)
+全表约束：攻击力更高的一方，蓄力回合不能反而更短。 ... ok
+test_required_enemy_types_exist (test_tactics.TestEnemyDesign.test_required_enemy_types_exist) ... ok
+test_spear_is_long_and_narrow (test_tactics.TestEnemyDesign.test_spear_is_long_and_narrow) ... ok
+test_three_named_enemies_scale_damage_and_charge (test_tactics.TestEnemyDesign.test_three_named_enemies_scale_damage_and_charge)
+点名要求的三种敌人：伤害严格递增，蓄力也严格递增。 ... ok
+test_dodging_avoids_damage (test_tactics.TestEnemyTelegraph.test_dodging_avoids_damage) ... ok
+test_enemy_starts_charging_when_player_in_pattern (test_tactics.TestEnemyTelegraph.test_enemy_starts_charging_when_player_in_pattern) ... ok
+test_standing_still_takes_damage (test_tactics.TestEnemyTelegraph.test_standing_still_takes_damage) ... ok
+test_telegraph_area_is_locked (test_tactics.TestEnemyTelegraph.test_telegraph_area_is_locked) ... ok
+test_arc_covers_front_and_both_wings (test_tactics.TestPatterns.test_arc_covers_front_and_both_wings) ... ok
+test_chebyshev_counts_diagonal_as_one (test_tactics.TestPatterns.test_chebyshev_counts_diagonal_as_one) ... ok
+test_facing_is_eight_directional (test_tactics.TestPatterns.test_facing_is_eight_directional) ... ok
+test_line_extends_and_stops_at_wall (test_tactics.TestPatterns.test_line_extends_and_stops_at_wall) ... ok
+test_melee_hits_only_front_tile (test_tactics.TestPatterns.test_melee_hits_only_front_tile) ... ok
+test_ranged_is_single_tile_with_range_check (test_tactics.TestPatterns.test_ranged_is_single_tile_with_range_check) ... ok
+test_target_on_self_has_no_area (test_tactics.TestPatterns.test_target_on_self_has_no_area) ... ok
+test_unknown_pattern_rejected (test_tactics.TestPatterns.test_unknown_pattern_rejected) ... ok
+test_cannot_attack_unexplored_tile (test_tactics.TestPlayerAttack.test_cannot_attack_unexplored_tile) ... ok
+test_cannot_attack_without_weapon (test_tactics.TestPlayerAttack.test_cannot_attack_without_weapon) ... ok
+test_heavy_weapon_charges_then_lands (test_tactics.TestPlayerAttack.test_heavy_weapon_charges_then_lands) ... ok
+test_light_weapon_resolves_immediately (test_tactics.TestPlayerAttack.test_light_weapon_resolves_immediately) ... ok
+test_moving_cancels_long_charge (test_tactics.TestPlayerAttack.test_moving_cancels_long_charge)
+蓄力超过 1 回合时，移动会打断它（现有武器最短是 1，这里手工加长来验证分支）。 ... ok
+test_ranged_weapon_respects_min_range (test_tactics.TestPlayerAttack.test_ranged_weapon_respects_min_range) ... ok
+test_monster_roundtrip_keeps_charge (test_tactics.TestSaveCompatibility.test_monster_roundtrip_keeps_charge) ... ok
+test_player_roundtrip_keeps_equipment_slots (test_tactics.TestSaveCompatibility.test_player_roundtrip_keeps_equipment_slots) ... ok
 
 ----------------------------------------------------------------------
-Ran 64 tests in 0.270s
+Ran 89 tests in 0.270s
 
 OK

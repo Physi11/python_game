@@ -20,7 +20,8 @@ from . import config
 from .combat import resolve_attack
 from .dungeon import Dungeon, Tile
 from .item import Item, item_from_dict, make_item, roll_item
-from .monster import MONSTER_BY_KIND, Monster, MonsterAction, roll_monster
+from .monster import MONSTER_BY_KIND, Monster, roll_monster
+from .patterns import chebyshev, pattern_tiles
 from .player import Player
 from .rng import Rng
 
@@ -98,7 +99,7 @@ class GameState:
         state.floor_turns = {"1": 0}
         state._build_floor(1)
         state._log(f"你踏入了地下城第 1 层，种子 {rng.seed}", LOG_SYSTEM)
-        state._log("方向键/WASD 移动，撞向怪物即可攻击，走上楼梯按 > 下楼", LOG_SYSTEM)
+        state._log("方向键/WASD 移动；右键或 F 瞄准攻击；蓝色是你能打的格子，红色是敌人即将落下的区域", LOG_SYSTEM)
         return state
 
     # ---------------------------------------------------------------- 楼层构建
@@ -188,9 +189,10 @@ class GameState:
 
     # ================================================================ 玩家意图
     def try_move(self, dx: int, dy: int) -> bool:
-        """向 (dx, dy) 走一步；若目标格有怪物则改为攻击。
+        """向 (dx, dy) 走一步。**移动就是这一回合的唯一行动。**
 
-        返回 True 表示动作成功（消耗了一个回合），False 表示被墙挡住等无效操作。
+        新战斗规则下"撞向怪物即攻击"已被取消：撞到敌人只会提示而不会攻击，
+        攻击必须显式选择目标区域（见 :meth:`attack_at`）。
         """
         if self.is_finished:
             return False
@@ -199,9 +201,9 @@ class GameState:
             return False
 
         nx, ny = self.player.x + dx, self.player.y + dy
-        target = self.monster_at(nx, ny)
-        if target is not None:
-            return self._take_turn(lambda: self._player_attack(target))
+        if self.monster_at(nx, ny) is not None:
+            self._log("那里站着敌人，攻击请用右键瞄准或按 F", LOG_SYSTEM)
+            return False
 
         if not self.dungeon.is_walkable(nx, ny):
             self._log("前面是石墙，无法通行", LOG_SYSTEM)
@@ -209,12 +211,142 @@ class GameState:
             return False
 
         def act() -> bool:
+            if self.player.charge_left > 0:
+                # 移动会打断重武器的蓄力，这是一个真实的取舍
+                self.player.charge_left = 0
+                self.player.charge_tiles = set()
+                self._log("你挪动脚步，蓄力被打断了", LOG_SYSTEM)
             self.player.move_to(nx, ny)
             self.player.steps += 1
             self._auto_pickup()
             return True
 
         return self._take_turn(act)
+
+    # ---------------------------------------------------------------- 攻击
+    def attack_tiles(self, x: int, y: int, slot: str = "weapon") -> frozenset[tuple[int, int]]:
+        """预览：用 ``slot`` 槽位的武器打向 (x, y) 会覆盖哪些格子。
+
+        界面用它画蓝色高亮，逻辑层用它判断命中，两边共用同一份计算。
+        """
+        weapon = self.player.equipment.get(slot)
+        if weapon is None:
+            return frozenset()
+        return pattern_tiles(
+            self.player.pos,
+            (x, y),
+            getattr(weapon, "pattern", "melee"),
+            getattr(weapon, "reach", 1),
+            getattr(weapon, "min_reach", 1),
+            blocked=lambda cx, cy: not self.dungeon.is_walkable(cx, cy),
+        )
+
+    def can_attack_at(self, x: int, y: int, slot: str = "weapon") -> tuple[bool, str]:
+        """攻击可行性校验，返回 (是否可行, 给玩家看的原因)。"""
+        if self.is_finished:
+            return False, "本局已经结束"
+        weapon = self.player.equipment.get(slot)
+        if weapon is None:
+            return False, "没有装备这类武器" if slot == "ranged" else "没有装备近战武器"
+        if (x, y) == self.player.pos:
+            return False, "不能攻击自己脚下"
+        if (x, y) not in self.dungeon.explored:
+            return False, "那一格还没探索过"
+        if getattr(weapon, "pattern", "melee") == "ranged":
+            distance = chebyshev(self.player.pos, (x, y))
+            min_reach = getattr(weapon, "min_reach", 1)
+            reach = getattr(weapon, "reach", 1)
+            if distance < min_reach:
+                return False, f"{weapon.name}太近了，至少隔 {min_reach} 格"
+            if distance > reach:
+                return False, f"超出{weapon.name}的射程（{reach} 格）"
+            if not self.dungeon.has_line_of_sight(
+                self.player.x, self.player.y, x, y
+            ):
+                return False, "视线被墙挡住了"
+        tiles = self.attack_tiles(x, y, slot)
+        if not tiles:
+            return False, "那个方向打不到"
+        # 关键：点击的格子必须真的落在攻击形状里。
+        # 否则"拿剑点远处"也会通过校验——方向上有格子就算合法，实际却打在空地上。
+        if (x, y) not in tiles:
+            return False, "那个位置不在攻击范围内"
+        return True, ""
+
+    def attack_at(self, x: int, y: int, slot: str = "weapon") -> bool:
+        """向 (x, y) 方向发动一次攻击。这是玩家回合的另一种行动。
+
+        - 轻武器：立即结算；
+        - 重武器（``charge > 0``）：先进入蓄力，下一回合自动落下。
+        """
+        if self.is_finished:
+            return False
+        ok, reason = self.can_attack_at(x, y, slot)
+        if not ok:
+            self._log(reason, LOG_SYSTEM)
+            return False
+
+        weapon = self.player.equipment[slot]
+        tiles = self.attack_tiles(x, y, slot)
+        charge = int(getattr(weapon, "charge", 0))
+
+        if charge > 0:
+            def begin() -> bool:
+                self.player.charge_left = charge
+                self.player.charge_weapon = weapon.key
+                self.player.charge_tiles = set(tiles)
+                self._emit("charge", x=self.player.x, y=self.player.y, text=f"{charge}")
+                self._log(
+                    f"你举起{weapon.name}开始蓄力（{charge} 回合后落下）", LOG_COMBAT
+                )
+                return True
+
+            return self._take_turn(begin)
+
+        return self._take_turn(lambda: self._resolve_player_attack(weapon, tiles))
+
+    def _resolve_player_attack(self, weapon: "Item", tiles: frozenset[tuple[int, int]]) -> bool:
+        """把一次攻击结算到区域内所有敌人身上。"""
+        targets = [
+            monster
+            for monster in list(self.monsters)
+            if monster.alive and (monster.x, monster.y) in tiles
+        ]
+        power = self.player.attack_power(weapon)
+        if not targets:
+            self._log(f"{weapon.name}挥空，没有打到任何东西", LOG_COMBAT)
+            return True
+
+        for monster in targets:
+            result = resolve_attack(power, monster.total_def(), self.rng)
+            if not result.hit:
+                self._log(f"{monster.name}闪身躲开了{weapon.name}", LOG_COMBAT)
+                self._emit("miss", x=monster.x, y=monster.y, text="MISS")
+                continue
+            actual = monster.take_damage(result.damage)
+            self.player.damage_dealt += actual
+            tone = "crit" if result.crit else "player"
+            self._emit("damage", x=monster.x, y=monster.y, text=f"-{actual}", tone=tone)
+            prefix = "暴击！" if result.crit else ""
+            self._log(f"{prefix}{weapon.name}命中{monster.name}，造成 {actual} 点伤害", LOG_COMBAT)
+            if not monster.alive:
+                self._kill_monster(monster)
+        return True
+
+    def _tick_player_charge(self) -> None:
+        """回合开始时推进玩家蓄力；归零则落下。"""
+        if self.player.charge_left <= 0:
+            return
+        self.player.charge_left -= 1
+        if self.player.charge_left > 0:
+            self._log(f"蓄力中……还需 {self.player.charge_left} 回合", LOG_COMBAT)
+            return
+        weapon = self.player.equipment.get("weapon") or self.player.equipment.get("ranged")
+        tiles = frozenset(self.player.charge_tiles)
+        self.player.charge_tiles = set()
+        self.player.charge_weapon = ""
+        if weapon is not None and tiles:
+            self._resolve_player_attack(weapon, tiles)
 
     def wait(self) -> bool:
         """原地等待一回合，用于诱敌或回血节奏。"""
@@ -275,6 +407,10 @@ class GameState:
         self._build_floor(self.floor + 1)
         self.turn += 1
         self.player.turns = self.turn
+        # 换了地图，之前锁定的打击点已经失效，蓄力必须清空
+        self.player.charge_left = 0
+        self.player.charge_tiles = set()
+        self.player.charge_weapon = ""
         self._log(f"你沿着石阶下到了第 {self.floor} 层", LOG_SYSTEM)
         if self.floor == config.BOSS_FLOOR:
             # 进入最终层时回满生命：否则玩家往往带着残血和空药水进场，
@@ -312,9 +448,15 @@ class GameState:
 
     # ================================================================ 回合流水线
     def _take_turn(self, action: Callable[[], bool]) -> bool:
-        """执行一次完整回合：玩家行动 → 怪物行动 → 视野刷新 → 状态判定。"""
+        """执行一次完整回合：结算蓄力 → 玩家行动 → 怪物行动 → 刷新视野 → 判定状态。"""
         if self.is_finished:
             return False
+
+        # 先推进玩家自己的蓄力：重武器是这一回合开始落下的
+        self._tick_player_charge()
+        if self.is_finished:
+            return False
+
         if not action():
             return False
 
@@ -325,25 +467,6 @@ class GameState:
         self._monster_phase()
         self.dungeon.compute_fov(self.player.x, self.player.y)
         self._check_status()
-        return True
-
-    def _player_attack(self, monster: Monster) -> bool:
-        """玩家攻击怪物。"""
-        result = resolve_attack(self.player.total_atk(), monster.total_def(), self.rng)
-        if not result.hit:
-            self._log(f"你挥空了，{monster.name}闪身躲开", LOG_COMBAT)
-            self._emit("miss", x=monster.x, y=monster.y, text="MISS")
-            return True
-
-        actual = monster.take_damage(result.damage)
-        self.player.damage_dealt += actual
-        tone = "crit" if result.crit else "player"
-        self._emit("damage", x=monster.x, y=monster.y, text=f"-{actual}", tone=tone)
-        prefix = "暴击！" if result.crit else ""
-        self._log(f"{prefix}你击中{monster.name}，造成 {actual} 点伤害", LOG_COMBAT)
-
-        if not monster.alive:
-            self._kill_monster(monster)
         return True
 
     def _kill_monster(self, monster: Monster) -> None:
@@ -366,32 +489,85 @@ class GameState:
             self._log("深渊领主轰然倒下，地下城的诅咒解除了——你通关了！", LOG_LEVEL)
 
     def _monster_phase(self) -> None:
-        """所有存活怪物依次行动。"""
+        """所有存活怪物依次行动，每只怪物每回合也只有一个行动。"""
         for monster in list(self.monsters):
             if not monster.alive or self.player.hp <= 0:
                 break
-            action: MonsterAction = monster.decide(self.dungeon, self.player, self.rng)
-            if action.kind == "attack":
-                self._monster_attack(monster)
-            elif action.kind == "move" and action.target is not None:
-                nx, ny = action.target
-                if (
-                    self.dungeon.is_walkable(nx, ny)
-                    and self.monster_at(nx, ny) is None
-                    and (nx, ny) != self.player.pos
-                ):
-                    monster.move_to(nx, ny)
+            self._monster_turn(monster)
 
-    def _monster_attack(self, monster: Monster) -> None:
-        """怪物攻击玩家。"""
+    def _monster_turn(self, monster: Monster) -> None:
+        """单只怪物的回合：蓄力中推进计数，否则判断能否起手，最后才考虑走位。"""
+        # 1) 已经锁定了打击区域：原地维持，计数归零就落下
+        if monster.charge_left > 0:
+            monster.charge_left -= 1
+            if monster.charge_left == 0:
+                self._enemy_strike(monster)
+            return
+
+        # 2) 玩家已经落在攻击形状里 → 起手蓄力（这就是红色预警的来源）
+        tiles = self._enemy_pattern(monster)
+        if self.player.pos in tiles:
+            monster.begin_charge(tiles)
+            self._log(
+                f"{monster.name}开始蓄力（{monster.range_text}），"
+                f"{monster.charge_turns} 回合后出手——离开红框！",
+                LOG_DANGER,
+            )
+            self._emit("telegraph", x=monster.x, y=monster.y)
+            return
+
+        # 3) 够不到就走位
+        if monster.ai == "guard":
+            return
+        if monster.ai == "wander":
+            if self.rng.chance(0.35):
+                step = monster.wander_step(self.dungeon, self.rng)
+                if step is not None and not self._blocked_by_actor(monster, *step):
+                    monster.move_to(*step)
+            return
+
+        step = monster._greedy_step(self.dungeon, self.player)
+        if step is not None and not self._blocked_by_actor(monster, *step):
+            monster.move_to(*step)
+
+    def _blocked_by_actor(self, mover: Monster, x: int, y: int) -> bool:
+        """目标格是否被玩家或别的怪物占着。"""
+        if (x, y) == self.player.pos:
+            return True
+        return any(m.alive and m is not mover and (m.x, m.y) == (x, y) for m in self.monsters)
+
+    def _enemy_pattern(self, monster: Monster) -> frozenset[tuple[int, int]]:
+        """怪物朝玩家方向的攻击形状（远程还要检查视线）。"""
+        if monster.pattern == "ranged" and not self.dungeon.has_line_of_sight(
+            monster.x, monster.y, self.player.x, self.player.y
+        ):
+            return frozenset()
+        return pattern_tiles(
+            monster.pos,
+            self.player.pos,
+            monster.pattern,
+            monster.reach,
+            monster.min_reach,
+            blocked=lambda cx, cy: not self.dungeon.is_walkable(cx, cy),
+        )
+
+    def _enemy_strike(self, monster: Monster) -> None:
+        """蓄力完成，对锁定区域结算一次打击。"""
+        tiles = frozenset(monster.telegraph)
+        monster.telegraph = set()
+        if self.player.pos not in tiles:
+            self._log(f"{monster.name}的攻击落空了——你已离开那片区域", LOG_COMBAT)
+            self._emit("miss", x=monster.x, y=monster.y, text="落空")
+            return
+
         result = resolve_attack(monster.total_atk(), self.player.total_def(), self.rng)
         if not result.hit:
-            self._log(f"{monster.name}扑了个空", LOG_COMBAT)
+            self._log(f"{monster.name}的攻击被你躲开", LOG_COMBAT)
             return
         actual = self.player.take_damage(result.damage)
         self.player.damage_taken += actual
         self._emit("damage", x=self.player.x, y=self.player.y, text=f"-{actual}", tone="hurt")
-        self._log(f"{monster.name}咬中你，造成 {actual} 点伤害", LOG_DANGER)
+        self._log(f"{monster.name}命中你，造成 {actual} 点伤害", LOG_DANGER)
 
         if not self.player.alive:
             self.status = GameStatus.DEAD

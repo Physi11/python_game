@@ -39,30 +39,34 @@ CAPTIONS: dict[str, str] = {
     "docs/flowcharts/01_主循环.png": "图 1  游戏主循环流程图",
     "docs/flowcharts/02_地图生成.png": "图 2  地牢地图生成流程图",
     "docs/flowcharts/03_战斗结算.png": "图 3  战斗结算流程图",
-    "docs/screenshots/01_开局界面.png": "图 4  游戏主界面（开局）",
-    "docs/screenshots/02_探索与战斗.png": "图 5  探索过程中的战争迷雾与彩色日志",
-    "docs/screenshots/03_操作说明.png": "图 6  操作说明窗口",
-    "docs/screenshots/04_背包.png": "图 7  背包窗口",
-    "docs/screenshots/05_结算.png": "图 8  本局结算窗口",
-    "docs/screenshots/07_排行榜.png": "图 9  历史战绩排行榜",
-    "docs/screenshots/06_统计图表.png": "图 10  程序内统计图表窗口",
-    "data/charts/01_到达层数趋势.png": "图 11  最近对局到达层数变化",
-    "data/charts/02_难度分布.png": "图 12  阵亡层数分布与死因统计",
-    "data/charts/03_战斗效率.png": "图 13  回合数与击杀数的关系",
-    "data/charts/04_分层节奏.png": "图 14  各层平均停留回合",
-    "data/charts/05_结果构成.png": "图 15  对局结果构成",
-    "docs/test_output.png": "图 16  单元测试运行结果",
+    "docs/screenshots/08_策略战斗.png": "图 4  策略战斗：蓝色瞄准范围、红色敌方预告与头顶倒计时",
+    "docs/screenshots/01_开局界面.png": "图 5  游戏主界面（开局）",
+    "docs/screenshots/02_探索与战斗.png": "图 6  探索过程中的战争迷雾与彩色日志",
+    "docs/screenshots/03_操作说明.png": "图 7  操作说明窗口",
+    "docs/screenshots/04_背包.png": "图 8  背包窗口",
+    "docs/screenshots/05_结算.png": "图 9  本局结算窗口",
+    "docs/screenshots/07_排行榜.png": "图 10  历史战绩排行榜",
+    "docs/screenshots/06_统计图表.png": "图 11  程序内统计图表窗口",
+    "data/charts/01_到达层数趋势.png": "图 12  最近对局到达层数变化",
+    "data/charts/02_难度分布.png": "图 13  阵亡层数分布与死因统计",
+    "data/charts/03_战斗效率.png": "图 14  回合数与击杀数的关系",
+    "data/charts/04_分层节奏.png": "图 15  各层平均停留回合",
+    "data/charts/05_结果构成.png": "图 16  对局结果构成",
+    "docs/test_output.png": "图 17  单元测试运行结果",
 }
 
 IMG_PATTERN = re.compile(r"^\[\[img:([^:\]]+):(\d+)\]\]\s*$", re.MULTILINE)
 
 
 # ------------------------------------------------------------------ 调用封装
-def call(tool: str, params: dict, retries: int = 2) -> dict:
+def call(tool: str, params: dict, retries: int = 0) -> dict:
     """调用一个 editor_sdk 工具，返回结果字典。
 
     大部分工具返回 JSON 对象，但 ``create_doc`` / ``save_file`` 这类
     只返回一行人类可读文本，此时包装成 ``{"_raw": 文本}`` 交给调用方处理。
+
+    **默认不重试**：插入类操作不是幂等的，一旦服务端已经写入但返回了非零退出码，
+    重试会把同一段内容插两次——上一版报告里 4.2 / 4.3 各出现两遍就是这么来的。
     """
     with tempfile.NamedTemporaryFile(
         "w", suffix=".json", delete=False, encoding="utf-8"
@@ -107,6 +111,19 @@ def last_pos(file_id: str) -> int:
 
 
 def insert_md(file_id: str, idx: int, markdown: str) -> int:
+    """插入一段 Markdown；失败时跳过并告警，绝不重复插入。
+
+    块已经被拆到"单段落"粒度，正常情况下不会失败。真失败时宁可缺一段，
+    也不要让同一段出现两遍——后者更难发现。
+    """
+    try:
+        return _insert_md_once(file_id, idx, markdown)
+    except RuntimeError as exc:
+        print(f"  [跳过一段] {markdown[:40]!r}：{str(exc)[:80]}")
+        return idx
+
+
+def _insert_md_once(file_id: str, idx: int, markdown: str) -> int:
     fd, name = tempfile.mkstemp(suffix=".md")
     os.close(fd)                      # 必须先关闭句柄，否则 Windows 下无法删除
     tmp = Path(name)
@@ -145,11 +162,28 @@ def insert_para(file_id: str, idx: int, text: str, *, size: float | None = None,
     }
     if fmt:
         params["text_format"] = fmt
-    result = call("doc_insert_paragraph_with_text", params)
+    try:
+        result = call("doc_insert_paragraph_with_text", params)
+    except RuntimeError:
+        # 文档末尾的坐标偶尔会越界，重新问一次真实末尾再插
+        params["idx"] = last_pos(file_id)
+        result = call("doc_insert_paragraph_with_text", params)
     return int(result.get("next_index") or result.get("position") or last_pos(file_id))
 
 
 # ------------------------------------------------------------------ 解析内容
+def split_block(markdown: str) -> list[str]:
+    """把一段 Markdown 拆成"一个段落 / 一个列表 / 一张表"级别的原子块。
+
+    为什么要拆到这么细：编辑器的整块插入不是原子操作——遇到"粗体 + 行内代码 +
+    列表"混排的复杂段落时，它可能先写进去一半再报错。若此时再retry或拆小重试，
+    结果就是同一段内容在文档里出现两遍（上一版 4.2/4.3 各出现两次即如此）。
+    拆成单段落之后每次插入都很小，实测不会再中途失败。
+    """
+    parts = [p.strip() for p in markdown.split("\n\n") if p.strip()]
+    return parts or [markdown.strip()]
+
+
 def parse_blocks() -> list[tuple[str, object]]:
     """把 Markdown 拆成 ('md', 文本) 与 ('img', 路径, 宽度) 两类块。"""
     text = SOURCE.read_text(encoding="utf-8")
@@ -158,12 +192,12 @@ def parse_blocks() -> list[tuple[str, object]]:
     for match in IMG_PATTERN.finditer(text):
         chunk = text[cursor:match.start()].strip()
         if chunk:
-            blocks.append(("md", chunk))
+            blocks.extend(("md", part) for part in split_block(chunk))
         blocks.append(("img", (match.group(1), int(match.group(2)))))
         cursor = match.end()
     tail = text[cursor:].strip()
     if tail:
-        blocks.append(("md", tail))
+        blocks.extend(("md", part) for part in split_block(tail))
     return blocks
 
 
@@ -352,7 +386,11 @@ def main() -> int:
         if kind == "md":
             markdown = normalize_markdown(payload)  # type: ignore[arg-type]
             table_weights.extend(table_column_weights(markdown))
-            cursor = insert_md(file_id, cursor, markdown)
+            try:
+                cursor = insert_md(file_id, cursor, markdown)
+            except RuntimeError as exc:
+                print(f"  [块 {index}] 插入失败：{markdown[:60]!r}")
+                raise exc
         else:
             rel_path, width = payload  # type: ignore[misc]
             image_path = (ROOT / rel_path).resolve()
@@ -361,14 +399,21 @@ def main() -> int:
                 continue
             call(
                 "doc_insert_image",
-                {"file_id": file_id, "idx": cursor, "image_path": str(image_path), "w": width},
+                {
+                    "file_id": file_id,
+                    "idx": cursor,
+                    "image_path": str(image_path),
+                    "w": width,
+                },
             )
             cursor = last_pos(file_id)
+
+            # 图注用 Markdown 插入而不是段落接口：图片之后的"文档末尾"
+            # 不接受 doc_insert_paragraph_with_text（会报 past the end of story），
+            # 但接受 doc_insert_markdown，所以图注统一走斜体段落。
             caption = CAPTIONS.get(rel_path, "")
             if caption:
-                cursor = insert_para(
-                    file_id, cursor, caption, size=9, jc="center", color="666666"
-                )
+                cursor = insert_md(file_id, cursor, f"*{caption}*")
         if index % 8 == 0:
             print(f"  进度 {index}/{len(blocks)}")
 

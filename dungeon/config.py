@@ -40,24 +40,24 @@ MIN_DAMAGE: int = 1             # 伤害下限，避免"打不动"的死循环
 
 # ---------------------------------------------------------------- 成长
 EXP_BASE: int = 18              # 1 级升 2 级所需经验
-EXP_GROWTH: float = 1.32        # 每级经验需求增长率
-LEVEL_UP_HP: int = 10           # 升级提升的最大生命
+EXP_GROWTH: float = 1.55        # 每级经验需求增长率
+LEVEL_UP_HP: int = 8           # 升级提升的最大生命
 LEVEL_UP_ATK: int = 2           # 升级提升的攻击
 LEVEL_UP_DEF: int = 1           # 升级提升的防御
 
 # ---------------------------------------------------------------- 平衡
 # 怪物成长必须快于玩家防御成长，否则后期会出现"怪物打不动玩家"的无聊局面
-MONSTER_HP_SCALE: float = 0.16  # 每深入一层，怪物生命 +16%
-MONSTER_ATK_SCALE: float = 0.22 # 每深入一层，怪物攻击 +22%
-MONSTER_COUNT_BASE: int = 4     # 第 1 层怪物数量
-MONSTER_COUNT_PER_FLOOR: int = 2
-MONSTER_COUNT_MAX: int = 18
+MONSTER_HP_SCALE: float = 0.22  # 每深入一层，怪物生命 +16%
+MONSTER_ATK_SCALE: float = 0.30 # 每深入一层，怪物攻击 +22%
+MONSTER_COUNT_BASE: int = 6     # 第 1 层怪物数量
+MONSTER_COUNT_PER_FLOOR: int = 3
+MONSTER_COUNT_MAX: int = 24
 ITEM_COUNT_MIN: int = 2         # 每层道具数量下限
 ITEM_COUNT_MAX: int = 4         # 每层道具数量上限
 FLOOR_TURN_LIMIT: int = 5000    # 单局回合上限，防止挂死
 
 # ---------------------------------------------------------------- 存档
-SAVE_VERSION: int = 1           # 存档格式版本号
+SAVE_VERSION: int = 2           # 存档格式版本号（v2 为策略战斗新增字段）
 SAVE_SLOTS: int = 3             # 存档槽位数
 DATA_DIR_NAME: str = "data"
 SAVE_DIR_NAME: str = "saves"

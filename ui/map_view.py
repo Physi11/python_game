@@ -39,6 +39,7 @@ class MapView(tk.Canvas):
         icon_set: Any = None,
         on_click: Callable[[int, int], None] | None = None,
         on_hover: Callable[[int, int], None] | None = None,
+        on_alt_click: Callable[[int, int], None] | None = None,
     ) -> None:
         super().__init__(
             master,
@@ -53,6 +54,7 @@ class MapView(tk.Canvas):
         self.icon_set = icon_set          # 图标清单为空时所有格子退回字符绘制
         self._on_click = on_click
         self._on_hover = on_hover
+        self._on_alt_click = on_alt_click
 
         self._rect: dict[tuple[int, int], int] = {}
         self._text: dict[tuple[int, int], int] = {}
@@ -60,6 +62,13 @@ class MapView(tk.Canvas):
         self._sig: dict[tuple[int, int], tuple[str, str, str, str, tuple[str, ...]]] = {}
         self._floats: list[list[Any]] = []
         self._hover_cell: tuple[int, int] | None = None
+
+        # 战斗图层：红/黄威胁区、蓝色瞄准预览、头顶倒计时
+        self._overlay_items: dict[tuple[int, int], int] = {}
+        self._threat_cells: set[tuple[int, int]] = set()
+        self._badges: dict[tuple[int, int], tuple[int, int]] = {}
+        self._aim_items: dict[tuple[int, int], int] = {}
+        self._aim_cells: set[tuple[int, int]] = set()
 
         self._build_grid()
         self._hover_box = self.create_rectangle(
@@ -70,6 +79,7 @@ class MapView(tk.Canvas):
         )
 
         self.bind("<Button-1>", self._handle_click)
+        self.bind("<Button-3>", self._handle_alt_click)
         self.bind("<Motion>", self._handle_hover)
         self.bind("<Leave>", self._handle_leave)
         self.bind("<Destroy>", self._handle_destroy)
@@ -103,6 +113,14 @@ class MapView(tk.Canvas):
         self.state = state
         self._sig.clear()
         self._clear_floats()
+        self.clear_aim()
+        for cell in list(self._badges):
+            for item in self._badges.pop(cell):
+                self.delete(item)
+        for cell in list(self._threat_cells):
+            if cell in self._overlay_items:
+                self.itemconfig(self._overlay_items[cell], state="hidden")
+        self._threat_cells.clear()
         self.refresh(force=True)
 
     def refresh(self, force: bool = False) -> None:
@@ -148,8 +166,108 @@ class MapView(tk.Canvas):
                     self.itemconfig(text_id, state="hidden")
 
         self._update_player_ring()
+        self._sync_threat_overlays()
+        self._sync_charge_badges()
         self.tag_raise(self._hover_box)
         self.tag_raise(self._player_ring)
+        self.tag_raise("aim")
+        self.tag_raise("badge")
+
+    # ------------------------------------------------------------ 威胁与瞄准图层
+    def _overlay(self, cell: tuple[int, int], color: str, tag: str) -> int:
+        """按需创建一个覆盖在格子上的半透明高亮块。"""
+        item = self._overlay_items.get(cell)
+        if item is None:
+            x, y = cell
+            item = self.create_rectangle(
+                x * TILE + 1, y * TILE + 1,
+                x * TILE + TILE - 1, y * TILE + TILE - 1,
+                fill=color, outline=color, stipple="gray25", width=2,
+                tags=(tag,), state="hidden",
+            )
+            self._overlay_items[cell] = item
+        self.itemconfig(item, fill=color, outline=color, tags=(tag,), state="normal")
+        return item
+
+    def _sync_threat_overlays(self) -> None:
+        """红色 = 敌人已锁定的打击区域；黄色 = 玩家自己的蓄力区域。"""
+        state = self.state
+        wanted: dict[tuple[int, int], str] = {}
+        if state is not None:
+            for monster in state.monsters:
+                if monster.alive and monster.telegraph:
+                    for cell in monster.telegraph:
+                        wanted[cell] = th.THREAT
+            if state.player.charge_left > 0:
+                for cell in state.player.charge_tiles:
+                    wanted[cell] = th.CHARGE
+
+        for cell in list(self._threat_cells - set(wanted)):
+            self.itemconfig(self._overlay_items[cell], state="hidden")
+        for cell, color in wanted.items():
+            self._overlay(cell, color, "threat")
+        self._threat_cells = set(wanted)
+
+    def _sync_charge_badges(self) -> None:
+        """敌人头顶的"还有几回合出手"倒计时。
+
+        数字直接写在格子上会被红色预告块吃掉对比度，所以做成
+        "深色小圆角底 + 亮红数字"的徽章，压在格子顶部。
+        """
+        state = self.state
+        wanted: dict[tuple[int, int], str] = {}
+        if state is not None:
+            for monster in state.monsters:
+                if monster.alive and monster.charge_left > 0:
+                    wanted[monster.pos] = str(monster.charge_left)
+
+        for cell in list(set(self._badges) - set(wanted)):
+            for item in self._badges.pop(cell):
+                self.delete(item)
+
+        for cell, text in wanted.items():
+            x, y = cell
+            cx = x * TILE + TILE / 2
+            top = y * TILE - 6
+            pair = self._badges.get(cell)
+            if pair is None:
+                rect = self.create_rectangle(
+                    cx - 7, top, cx + 7, top + 13,
+                    fill="#141821", outline=th.THREAT, width=1, tags=("badge",),
+                )
+                label = self.create_text(
+                    cx, top + 6, text=text, fill=th.THREAT_TEXT,
+                    font=self.theme.tiny, tags=("badge",),
+                )
+                self._badges[cell] = (rect, label)
+            else:
+                rect, label = pair
+                self.coords(rect, cx - 7, top, cx + 7, top + 13)
+                self.coords(label, cx, top + 6)
+                self.itemconfig(label, text=text)
+
+    def show_aim(self, cells: frozenset[tuple[int, int]], valid: bool = True) -> None:
+        """瞄准预览：蓝色高亮这一击会覆盖哪些格子。"""
+        color = th.AIM if valid else th.AIM_BAD
+        for cell in list(self._aim_cells - cells):
+            self.itemconfig(self._aim_items[cell], state="hidden")
+        for cell in cells:
+            item = self._aim_items.get(cell)
+            if item is None:
+                x, y = cell
+                item = self.create_rectangle(
+                    x * TILE + 1, y * TILE + 1,
+                    x * TILE + TILE - 1, y * TILE + TILE - 1,
+                    fill=color, outline=color, stipple="gray50", width=2, tags=("aim",),
+                )
+                self._aim_items[cell] = item
+            self.itemconfig(item, fill=color, outline=color, state="normal")
+        self._aim_cells = set(cells)
+
+    def clear_aim(self) -> None:
+        for item in self._aim_items.values():
+            self.itemconfig(item, state="hidden")
+        self._aim_cells = set()
 
     def _update_player_ring(self) -> None:
         px, py = self.state.player.pos
@@ -309,6 +427,16 @@ class MapView(tk.Canvas):
         cell = self.cell_at(event.x, event.y)
         if cell is not None and self._on_click is not None:
             self._on_click(*cell)
+
+    def _handle_alt_click(self, event: tk.Event) -> None:
+        """右键：切换瞄准模式。"""
+        try:
+            self.focus_set()
+        except tk.TclError:      # pragma: no cover
+            pass
+        cell = self.cell_at(event.x, event.y)
+        if cell is not None and self._on_alt_click is not None:
+            self._on_alt_click(*cell)
 
     def _handle_hover(self, event: tk.Event) -> None:
         cell = self.cell_at(event.x, event.y)

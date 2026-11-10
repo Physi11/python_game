@@ -44,7 +44,7 @@ LISTBOX_OWNED = frozenset(
     {"up", "down", "left", "right", "prior", "next", "home", "end", "space"}
 )
 
-DEFAULT_HINT = "WASD/方向键 移动　空格 等待　G 拾取/下楼　I 背包　> 下楼　F5/F9 存读档　? 帮助"
+DEFAULT_HINT = "右键/F 瞄准　左键 移动或确认　Tab 换武器　空格 等待　G 拾取　> 下楼　? 帮助"
 
 
 class App(tk.Tk):
@@ -68,6 +68,9 @@ class App(tk.Tk):
         self._record_saved = False
         self._status_after: str | None = None
         self._last_log: tuple[str, str] | None = None
+        # 瞄准模式：None 表示普通模式，"weapon"/"ranged" 表示正在用该槽位的武器瞄准
+        self.aim_slot: str | None = None
+        self._aim_cell: tuple[int, int] | None = None
 
         self._build_ui()
         self._build_menu()
@@ -90,6 +93,7 @@ class App(tk.Tk):
             icon_set=self.icons,
             on_click=self._on_canvas_click,
             on_hover=self._on_canvas_hover,
+            on_alt_click=self._on_canvas_alt,
         )
         self.map_view.pack(side="left")
 
@@ -243,6 +247,9 @@ class App(tk.Tk):
         self._append_new_log()
         if self.state.log:
             self._last_log = self.state.log[-1]
+        # 局面变了，瞄准高亮要跟着重算（敌人走位会让命中格变化）
+        if self.aim_slot is not None and self._aim_cell is not None:
+            self._update_aim(self._aim_cell)
         self._check_finished()
 
     def _check_finished(self) -> None:
@@ -288,29 +295,45 @@ class App(tk.Tk):
             return
 
         if keysym in DIR_KEYS:
+            self._exit_aim_silent()
             dx, dy = DIR_KEYS[keysym]
             self._do_move(dx, dy)
             return
 
         if keysym in ("space", " "):
+            self._exit_aim_silent()
             self._do_action(self.state.wait)
         elif keysym == "g":
+            self._exit_aim_silent()
             self._interact_here()
         elif keysym == "greater" or keysym == "period":
+            self._exit_aim_silent()
             self._do_action(self.state.descend)
+        elif keysym == "f":
+            if self.aim_slot is None:
+                self._enter_aim(self._preferred_slot())
+            else:
+                self._exit_aim()
+        elif keysym == "tab" and self.aim_slot is not None:
+            self._cycle_weapon()
         elif keysym == "i":
+            self._exit_aim_silent()
             self.show_inventory()
         elif keysym == "n":
             self.new_game()
         elif keysym == "m":
             self.show_charts()
         elif keysym == "escape":
-            self._leave_list_focus()
+            if self.aim_slot is not None:
+                self._exit_aim()
+            else:
+                self._leave_list_focus()
         elif keysym == "question" or keysym == "slash":
             self.show_help()
         elif keysym in tuple(f"kp_{i}" for i in range(1, 10)) or (
             len(keysym) == 1 and keysym.isdigit() and keysym != "0"
         ):
+            self._exit_aim_silent()
             index = int(keysym[-1]) - 1
             self._use_item(index)
         else:
@@ -358,6 +381,13 @@ class App(tk.Tk):
         else:
             self._do_action(state.interact)
 
+    def _exit_aim_silent(self) -> None:
+        """动作类按键先静默退出瞄准，不打断动作本身。"""
+        if self.aim_slot is not None:
+            self.aim_slot = None
+            self._aim_cell = None
+            self.map_view.clear_aim()
+
     def _do_move(self, dx: int, dy: int) -> None:
         self._do_action(lambda: self.state.try_move(dx, dy))
 
@@ -387,9 +417,13 @@ class App(tk.Tk):
             self._focus_map()
 
     def _on_canvas_click(self, x: int, y: int) -> None:
-        """鼠标点击：相邻格移动/攻击，同格执行默认交互（拾取或下楼）。"""
+        """鼠标左键：瞄准模式下确认攻击，否则相邻格移动 / 脚下交互。"""
         if self.state.is_finished:
             return
+        if self.aim_slot is not None:
+            self._confirm_attack(x, y)
+            return
+
         px, py = self.state.player.pos
         if (x, y) == (px, py):
             self._interact_here()
@@ -398,9 +432,90 @@ class App(tk.Tk):
         if abs(dx) + abs(dy) == 1:
             self._do_move(dx, dy)
         else:
-            self.set_status("只能移动到相邻的格子（用键盘可连续移动）", "warn")
+            self.set_status("移动只能走相邻格；想打远处请右键进入瞄准", "warn")
+
+    # ---------------------------------------------------------------- 瞄准
+    def _on_canvas_alt(self, x: int, y: int) -> None:
+        """右键：进入 / 退出瞄准模式。"""
+        if self.state.is_finished:
+            return
+        if self.aim_slot is None:
+            self._enter_aim(self._preferred_slot())
+        else:
+            self._exit_aim()
+
+    def _preferred_slot(self) -> str | None:
+        """优先选玩家手上有的武器；两个都有就按上次用的来。"""
+        player = self.state.player
+        for slot in ("weapon", "ranged"):
+            if player.equipment.get(slot) is not None:
+                return slot
+        return None
+
+    def _enter_aim(self, slot: str | None, cell: tuple[int, int] | None = None) -> None:
+        if slot is None:
+            self.set_status("没有装备任何武器，先去背包里装备一把", "warn")
+            return
+        weapon = self.state.player.equipment.get(slot)
+        if weapon is None:
+            self.set_status("这个槽位没有武器", "warn")
+            return
+        self.aim_slot = slot
+        self._aim_cell = cell
+        self.map_view.focus_set()
+        self.set_status(
+            f"瞄准中：{weapon.name}（{weapon.range_text}）　左键确认　右键/Esc 取消　Tab 切换武器"
+        )
+        if cell is not None:
+            self._update_aim(cell)
+
+    def _exit_aim(self) -> None:
+        self.aim_slot = None
+        self._aim_cell = None
+        self.map_view.clear_aim()
+        self.set_status("已退出瞄准")
+
+    def _update_aim(self, cell: tuple[int, int]) -> None:
+        if self.aim_slot is None:
+            return
+        self._aim_cell = cell
+        tiles = self.state.attack_tiles(cell[0], cell[1], self.aim_slot)
+        ok, reason = self.state.can_attack_at(cell[0], cell[1], self.aim_slot)
+        self.map_view.show_aim(tiles, valid=ok)
+        if ok:
+            weapon = self.state.player.equipment[self.aim_slot]
+            self.set_status(f"{weapon.name} 将覆盖 {len(tiles)} 格　左键确认")
+        else:
+            self.set_status(reason, "warn")
+
+    def _confirm_attack(self, x: int, y: int) -> None:
+        slot = self.aim_slot
+        ok, reason = self.state.can_attack_at(x, y, slot)
+        if not ok:
+            self.set_status(reason, "warn")
+            return
+        weapon = self.state.player.equipment[slot]
+        self._exit_aim()
+        if self.state.attack_at(x, y, slot):
+            if getattr(weapon, "charge", 0) > 0:
+                self.set_status(f"{weapon.name}蓄力中，下一回合落下")
+            else:
+                self.set_status(f"{weapon.name}出手")
+        self._refresh()
+
+    def _cycle_weapon(self) -> None:
+        """Tab：在近战 / 远程之间切换。"""
+        player = self.state.player
+        other = "ranged" if self.aim_slot == "weapon" else "weapon"
+        if player.equipment.get(other) is None:
+            self.set_status("另一个武器槽是空的", "warn")
+            return
+        self._enter_aim(other, self._aim_cell)
 
     def _on_canvas_hover(self, x: int, y: int) -> None:
+        if self.aim_slot is not None:
+            self._update_aim((x, y))
+            return
         state = self.state
         if (x, y) not in state.dungeon.explored:
             self.set_status("未探索的区域")

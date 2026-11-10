@@ -28,8 +28,21 @@ class SaveError(Exception):
     """存档读写失败。所有对外抛出的异常都统一成这个类型，便于界面层提示。"""
 
 
+def _migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """v1 → v2：策略战斗新增了装备槽与蓄力字段。
+
+    这些字段在 ``Player.from_dict`` / ``Monster.from_dict`` 里都有默认值，
+    所以迁移是**恒等**的——真正的作用是让旧存档能通过版本检查，
+    而不是被"缺少迁移方案"挡在门外。
+    """
+    data["version"] = 2
+    return data
+
+
 # 版本迁移函数链：{源版本: 升级到下一版本的函数}
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    1: _migrate_v1_to_v2,
+}
 
 
 class SaveManager:

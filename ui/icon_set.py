@@ -25,11 +25,12 @@ from dungeon import config
 from .icons import DEFAULT_BASE_DIR, IconManifest, IconSpec, lookup
 
 try:  # Pillow 只是"推荐依赖"，没有它游戏照样能玩
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageChops, ImageTk
 
     PIL_OK = True
 except ImportError:  # pragma: no cover - 取决于运行环境
     Image = None  # type: ignore[assignment]
+    ImageChops = None  # type: ignore[assignment]
     ImageTk = None  # type: ignore[assignment]
     PIL_OK = False
 
@@ -49,6 +50,20 @@ def _dimmed(image: Any) -> Any:
     """只压暗 RGB、保留 alpha。"""
     r, g, b, a = image.convert("RGBA").split()
     rgb = Image.merge("RGB", (r, g, b)).point(lambda value: int(value * _DIM_FACTOR))
+    r2, g2, b2 = rgb.split()
+    return Image.merge("RGBA", (r2, g2, b2, a))
+
+
+def _tinted(image: Any, tint: str) -> Any:
+    """给白色剪影上色：RGB 逐通道相乘，alpha 原样保留。
+
+    game-icons 提供的是纯白图标，``白 × 颜色 = 颜色``，于是同一份素材
+    可以同时用作红色怪物、青色玩家、金色道具，不必存多份彩色图。
+    """
+    rgba = image.convert("RGBA")
+    r, g, b, a = rgba.split()
+    color = Image.new("RGB", rgba.size, tint)
+    rgb = ImageChops.multiply(Image.merge("RGB", (r, g, b)), color)
     r2, g2, b2 = rgb.split()
     return Image.merge("RGBA", (r2, g2, b2, a))
 
@@ -110,18 +125,20 @@ class IconSet:
             return None
         try:
             if PIL_OK:
-                return self._render_with_pillow(path, dim)
+                return self._render_with_pillow(path, dim, spec.tint)
             return self._render_plain(path, dim)
         except Exception:  # noqa: BLE001 - 坏图不能拖垮游戏
             self.failed.append(spec.file)
             return None
 
-    def _render_with_pillow(self, path: Path, dim: bool) -> Any | None:
+    def _render_with_pillow(self, path: Path, dim: bool, tint: str = "") -> Any | None:
         with Image.open(path) as raw:
             raw.load()
             image = raw.convert("RGBA")
         image.thumbnail((_PREPARE_PX, _PREPARE_PX), _LANCZOS)
         image = image.resize((self._size, self._size), _NEAREST)
+        if tint:
+            image = _tinted(image, tint)
         if dim:
             image = _dimmed(image)
         return ImageTk.PhotoImage(image, master=self._master)

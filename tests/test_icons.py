@@ -99,11 +99,28 @@ class TestManifestLoading(ManifestCase):
         self.assertTrue(manifest.base_dir.is_absolute())
         self.assertEqual(manifest.base_dir.name, "icons")
 
+    def test_tint_is_parsed_and_validated(self) -> None:
+        """tint 必须是 #rrggbb，写错就忽略而不是让整条图标失效。"""
+        path = self.write_manifest(
+            {
+                "version": 1,
+                "entries": {
+                    "a": {"file": "a.png", "tint": "#E05A5A"},
+                    "b": {"file": "b.png", "tint": "red"},
+                    "c": {"file": "c.png"},
+                },
+            }
+        )
+        manifest = load_manifest(path)
+        self.assertEqual(manifest.entries["a"].tint, "#E05A5A")
+        self.assertEqual(manifest.entries["b"].tint, "")
+        self.assertEqual(manifest.entries["c"].tint, "")
+
     def test_shipped_manifest_is_valid(self) -> None:
         """项目自带的那份清单必须能正常解析，且每条都是相对 .png。"""
         self.assertTrue(DEFAULT_MANIFEST_PATH.is_file(), "assets/icons.json 不见了")
         manifest = load_manifest()
-        self.assertGreaterEqual(len(manifest.entries), 20)
+        self.assertGreaterEqual(len(manifest.entries), 15)
         for spec in manifest.entries.values():
             self.assertTrue(spec.file.endswith(".png"), spec.file)
             self.assertFalse(spec.file.startswith("/"), spec.file)

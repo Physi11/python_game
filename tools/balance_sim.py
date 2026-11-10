@@ -50,6 +50,7 @@ class AutoPlayer:
         self.ignore_monsters_until = 0
         self._floor_start_turn = 0
         self._tracked_floor = 0
+        self.last_action = ""
 
     def step(self) -> bool:
         """执行一个动作，返回 False 表示本局结束。"""
@@ -64,21 +65,34 @@ class AutoPlayer:
         # 0) 换上更好的武器/护甲（普通玩家都会做，早期版本漏了这一步导致胜率失真）
         upgrade = self._find_upgrade()
         if upgrade is not None:
+            self.last_action = "equip"
             return state.use_item(upgrade)
 
         # 1) 血量低于 35% 且有药水，先喝药
         if player.hp / max(1, player.max_hp) < 0.35:
             for index, item in enumerate(player.inventory):
                 if item.kind == "potion":
+                    self.last_action = "potion"
                     return state.use_item(index)
 
-        # 2) 相邻敌人 → 攻击（永远优先，涉及生死）
-        visible = state.visible_monsters()
-        for monster in visible:
-            if monster.distance_to(player) == 1:
-                return state.try_move(monster.x - player.x, monster.y - player.y)
+        # 2) 站在红框里且**这一回合就要挨打** → 先躲；离落下还早的话照常输出
+        if self._in_danger_now():
+            escape = self._step_out_of_danger()
+            if escape is not None:
+                self.last_action = "dodge"
+                return state.try_move(*escape)
 
-        # 3) 近处敌人 → 逼近。震荡检测触发时本阶段被跳过
+        # 3) 能打就打：近战优先，够不到再换弓
+        target = self._best_target()
+        if target is not None:
+            slot = self._usable_slot(target)
+            if slot is not None:
+                self.last_action = f"attack:{slot}:{target.name}"
+                return state.attack_at(target.x, target.y, slot)
+
+        visible = state.visible_monsters()
+
+        # 4) 近处敌人 → 逼近。震荡检测触发时本阶段被跳过
         if visible and state.turn >= self.ignore_monsters_until:
             nearby = [m for m in visible if m.distance_to(player) <= self.CHASE_RANGE]
             if nearby:
@@ -129,12 +143,63 @@ class AutoPlayer:
         return state.wait()
 
     # ------------------------------------------------------------ 内部工具
+    def _in_danger_now(self) -> bool:
+        """脚下是否压在"下一回合就会落下"的红色预警里。
+
+        只在敌人 charge_left <= 1 时才躲：否则会陷入"敌人一起手就躲、
+        躲完敌人又起手"的空转循环，永远打不出输出。
+        """
+        pos = self.state.player.pos
+        return any(
+            m.alive and pos in m.telegraph and m.charge_left <= 1
+            for m in self.state.monsters
+        )
+
+    def _step_out_of_danger(self) -> tuple[int, int] | None:
+        """找一个既不在红框、也不被占用的相邻格。"""
+        state = self.state
+        pos = state.player.pos
+        danger = set()
+        for monster in state.monsters:
+            if monster.alive:
+                danger |= monster.telegraph
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            cell = (pos[0] + dx, pos[1] + dy)
+            if not state.dungeon.is_walkable(*cell):
+                continue
+            if state.monster_at(*cell) is not None or cell in danger:
+                continue
+            return dx, dy
+        return None
+
+    def _best_target(self):
+        """挑一个当前就能打到的敌人，优先血少的。"""
+        state = self.state
+        reachable = [
+            m for m in state.visible_monsters() if self._usable_slot(m) is not None
+        ]
+        if not reachable:
+            return None
+        return min(reachable, key=lambda m: (m.hp, m.distance_to(state.player)))
+
+    def _usable_slot(self, monster) -> str | None:
+        """这只敌人能用哪个槽位打到；都打不到返回 None。"""
+        state = self.state
+        for slot in ("weapon", "ranged"):
+            if state.player.equipment.get(slot) is None:
+                continue
+            ok, _ = state.can_attack_at(monster.x, monster.y, slot)
+            if ok:
+                return slot
+        return None
+
     def _find_upgrade(self) -> int | None:
         """在背包里找一件比当前更好的装备，返回其下标。"""
         player = self.state.player
         for index, item in enumerate(player.inventory):
             if item.kind == "weapon":
-                current = player.equipment.get("weapon")
+                slot = getattr(item, "slot", "melee")
+                current = player.equipment.get(slot)
                 if current is None or item.atk_bonus > getattr(current, "atk_bonus", 0):
                     return index
             elif item.kind == "armor":

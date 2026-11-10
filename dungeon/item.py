@@ -76,23 +76,68 @@ class Potion(Item):
 
 
 class Weapon(Item):
-    """武器，装备后提升攻击力。"""
+    """武器。除了加攻击，还决定**怎么打**。
+
+    一把武器带有完整的攻击描述：
+    - ``slot``   占用哪个装备槽：``melee``（兵刃）或 ``ranged``（弓）
+    - ``pattern`` 攻击形状，见 ``dungeon.patterns``
+    - ``reach``  最大射程（格）
+    - ``charge`` 出手前的蓄力回合数，0 表示即时
+
+    "伤害越高、蓄力越长"这条规则就落在 ``atk_bonus`` 与 ``charge`` 的搭配上：
+    巨刃 +8 但要蓄力 1 回合，铁剑 +2 可以立刻挥出。
+    """
 
     kind = "weapon"
     glyph = "/"
 
-    def __init__(self, key: str, name: str, desc: str, atk_bonus: int) -> None:
+    def __init__(
+        self,
+        key: str,
+        name: str,
+        desc: str,
+        atk_bonus: int,
+        slot: str = "melee",
+        pattern: str = "melee",
+        reach: int = 1,
+        charge: int = 0,
+        min_reach: int = 1,
+    ) -> None:
         super().__init__(key, name, desc)
         self.atk_bonus = int(atk_bonus)
+        self.slot = slot
+        self.pattern = pattern
+        self.reach = int(reach)
+        self.charge = int(charge)
+        self.min_reach = int(min_reach)
+
+    @property
+    def slot_name(self) -> str:
+        return "远程" if self.slot == "ranged" else "近战"
+
+    @property
+    def range_text(self) -> str:
+        """给人看的射程描述，例如"直线 3 格"。"""
+        if self.pattern == "ranged":
+            return f"射程 {self.min_reach}~{self.reach} 格"
+        if self.pattern == "line":
+            return f"直线 {self.reach} 格"
+        if self.pattern == "arc":
+            return "身前三格横扫"
+        return "贴身 1 格"
 
     def apply(self, player: "Player", state: Any = None) -> tuple[bool, str]:
-        old = player.equipment.get("weapon")
+        old = player.equipment.get(self.slot)
         if old is not None and old.key == self.key:
             return False, f"已经装备着{self.name}了"
         player.equip(self)
         player.items_used += 1
         replaced = f"，替换下{old.name}" if old is not None else ""
-        return True, f"装备{self.name}（攻击 +{self.atk_bonus}）{replaced}"
+        return True, f"装备{self.name}（{self.slot_name} · 攻击 +{self.atk_bonus}）{replaced}"
+
+    def describe(self) -> str:
+        extra = f"蓄力 {self.charge} 回合" if self.charge else "即时出手"
+        return f"{self.name} —— {self.slot_name}，{self.range_text}，{extra}；{self.desc}"
 
     def to_dict(self) -> dict[str, Any]:
         data = super().to_dict()
@@ -181,14 +226,37 @@ _ITEM_DEFS: dict[str, dict[str, Any]] = {
     "sword_iron": {
         "factory": Weapon, "name": "铁剑", "desc": "攻击 +2",
         "atk_bonus": 2, "min_floor": 1,
+        "slot": "melee", "pattern": "melee", "reach": 1, "charge": 0,
     },
     "sword_rune": {
         "factory": Weapon, "name": "符文长剑", "desc": "攻击 +4",
         "atk_bonus": 4, "min_floor": 4,
+        "slot": "melee", "pattern": "melee", "reach": 1, "charge": 0,
     },
     "blade_abyss": {
         "factory": Weapon, "name": "深渊之刃", "desc": "攻击 +7",
         "atk_bonus": 7, "min_floor": 7,
+        "slot": "melee", "pattern": "melee", "reach": 1, "charge": 0,
+    },
+    "spear_bone": {
+        "factory": Weapon, "name": "骨矛", "desc": "攻击 +3，直线贯穿",
+        "atk_bonus": 3, "min_floor": 2,
+        "slot": "melee", "pattern": "line", "reach": 3, "charge": 0,
+    },
+    "greatsword": {
+        "factory": Weapon, "name": "巨刃", "desc": "攻击 +8，身前三格横扫",
+        "atk_bonus": 8, "min_floor": 6,
+        "slot": "melee", "pattern": "arc", "reach": 2, "charge": 1,
+    },
+    "bow_short": {
+        "factory": Weapon, "name": "短弓", "desc": "攻击 +3，射程 4 格",
+        "atk_bonus": 3, "min_floor": 1,
+        "slot": "ranged", "pattern": "ranged", "reach": 4, "min_reach": 2, "charge": 0,
+    },
+    "bow_long": {
+        "factory": Weapon, "name": "长弓", "desc": "攻击 +6，射程 6 格，需蓄力",
+        "atk_bonus": 6, "min_floor": 5,
+        "slot": "ranged", "pattern": "ranged", "reach": 6, "min_reach": 2, "charge": 1,
     },
     "armor_leather": {
         "factory": Armor, "name": "皮甲", "desc": "防御 +1",
@@ -228,7 +296,17 @@ def make_item(key: str) -> Item:
     if cls is Potion:
         return Potion(key, spec["name"], spec["desc"], spec["heal_amount"])
     if cls is Weapon:
-        return Weapon(key, spec["name"], spec["desc"], spec["atk_bonus"])
+        return Weapon(
+            key,
+            spec["name"],
+            spec["desc"],
+            spec["atk_bonus"],
+            slot=spec.get("slot", "melee"),
+            pattern=spec.get("pattern", "melee"),
+            reach=spec.get("reach", 1),
+            charge=spec.get("charge", 0),
+            min_reach=spec.get("min_reach", 1),
+        )
     if cls is Armor:
         return Armor(key, spec["name"], spec["desc"], spec["def_bonus"])
     if cls is Scroll:

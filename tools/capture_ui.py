@@ -88,6 +88,25 @@ def main() -> int:
     pump(app)
     grab(app, OUT_DIR / "02_探索与战斗.png", app)
 
+    # 2.5) 策略战斗：红色预告 + 头顶倒计时 + 蓝色瞄准范围
+    from dungeon.monster import MONSTER_BY_KIND, Monster
+
+    st = app.state
+    hero = st.player
+    for kind, dx, dy in (("spearman", 2, 0), ("archer", 1, -2), ("swordsman", 0, 2)):
+        extra = Monster(MONSTER_BY_KIND[kind], hero.x + dx, hero.y + dy, 1)
+        if st.dungeon.is_walkable(extra.x, extra.y):
+            st.monsters.append(extra)
+    st.dungeon.compute_fov(hero.x, hero.y)
+    app._refresh()
+    st.wait()                     # 让敌人起手蓄力，红框与倒计时才会出现
+    app._refresh()
+    app._enter_aim("weapon")
+    app._update_aim((hero.x + 1, hero.y))
+    pump(app)
+    grab(app, OUT_DIR / "08_策略战斗.png", app)
+    app._exit_aim()
+
     # 3) 帮助窗口
     help_win = dialogs.show_help(app, app.theme)
     pump(app, times=10, delay=0.05)

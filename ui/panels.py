@@ -92,10 +92,14 @@ class StatusPanel(ttk.Frame):
 
         # 装备
         ttk.Label(self, text="装 备", style="Title.TLabel").pack(anchor="w", **pad)
-        self.lbl_weapon = ttk.Label(self, text="武器：—", style="Dim.TLabel")
+        self.lbl_weapon = ttk.Label(self, text="近战：—", style="Dim.TLabel")
         self.lbl_weapon.pack(anchor="w", **pad)
+        self.lbl_ranged = ttk.Label(self, text="远程：—", style="Dim.TLabel")
+        self.lbl_ranged.pack(anchor="w", **pad)
         self.lbl_armor = ttk.Label(self, text="护甲：—", style="Dim.TLabel")
-        self.lbl_armor.pack(anchor="w", pady=(0, 8), **pad)
+        self.lbl_armor.pack(anchor="w", **pad)
+        self.lbl_charge = ttk.Label(self, text="", style="Dim.TLabel", foreground=th.CHARGE)
+        self.lbl_charge.pack(anchor="w", pady=(0, 8), **pad)
 
         # 背包
         ttk.Label(self, text="背 包（双击使用）", style="Title.TLabel").pack(anchor="w", **pad)
@@ -173,14 +177,28 @@ class StatusPanel(ttk.Frame):
         self.value_labels["gold"].config(text=str(player.gold))
         self.value_labels["turns"].config(text=str(state.turn))
 
-        weapon = player.equipment.get("weapon")
+        melee = player.equipment.get("weapon")
+        ranged = player.equipment.get("ranged")
         armor = player.equipment.get("armor")
         self.lbl_weapon.config(
-            text=f"武器：{weapon.name}（+{weapon.atk_bonus}）" if weapon else "武器：—"
+            text=(
+                f"近战：{melee.name}（+{melee.atk_bonus} · {melee.range_text}）"
+                if melee else "近战：—"
+            )
+        )
+        self.lbl_ranged.config(
+            text=(
+                f"远程：{ranged.name}（+{ranged.atk_bonus} · {ranged.range_text}）"
+                if ranged else "远程：—"
+            )
         )
         self.lbl_armor.config(
             text=f"护甲：{armor.name}（+{armor.def_bonus}）" if armor else "护甲：—"
         )
+        if player.charge_left > 0:
+            self.lbl_charge.config(text=f"⚡ 蓄力中，{player.charge_left} 回合后落下")
+        else:
+            self.lbl_charge.config(text="")
 
         # 背包重新填充；只在内容变化时重建，避免每次刷新都打断选中状态
         entries = [f"{i + 1}. {item.glyph} {item.name}" for i, item in enumerate(player.inventory)]

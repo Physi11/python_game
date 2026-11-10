@@ -18,19 +18,30 @@ from dungeon.stats import StatsAnalyzer
 from . import theme as th
 
 HELP_ROWS = [
-    ("↑ ↓ ← → / W A S D", "上下左右移动；朝怪物方向移动即发起攻击"),
+    ("↑ ↓ ← → / W A S D", "移动一格（每回合只能做一个行动：移动 / 攻击 / 等待）"),
     ("空格", "原地等待一回合"),
+    ("F 或 鼠标右键", "进入 / 退出瞄准模式"),
+    ("鼠标左键", "瞄准中：确认攻击；平时：点击相邻格移动、点脚下拾取或下楼"),
+    ("Tab", "瞄准中切换近战 / 远程武器"),
+    ("Esc", "取消瞄准（没有瞄准时把焦点交还地图）"),
     ("G", "拾取脚下道具；站在楼梯上则直接下楼"),
     ("1 ~ 9", "快速使用背包中对应编号的道具"),
     ("I", "打开 / 关闭背包"),
-    (">", "站在楼梯上时进入下一层（按 G 或点击脚下也可以）"),
+    (">", "站在楼梯上时进入下一层"),
     ("F5 / Ctrl+S", "保存到 1 号存档槽"),
     ("F9 / Ctrl+O", "读取 1 号存档槽"),
     ("N", "开始新的一局"),
     ("M", "打开 / 关闭统计图表"),
+    ("F12", "重载图标资源"),
     ("?", "显示本帮助"),
-    ("鼠标左键", "点击相邻格子移动或攻击，点击道具格拾取"),
-    ("鼠标悬停", "查看该格的怪物或道具详情"),
+]
+
+# 战斗配色说明，单独一段，避免塞进按键表里
+COMBAT_LEGEND = [
+    ("蓝色高亮", "你这一击会覆盖的格子（瞄准时实时预览）"),
+    ("红色高亮", "敌人已经锁定的打击区域，站进去就会挨打"),
+    ("黄色高亮", "你自己的蓄力区域，重武器会在下回合落下"),
+    ("头顶数字", "敌人还有几回合出手；数字归零的那一回合结算"),
 ]
 
 
@@ -106,7 +117,7 @@ def _bind_focus_return(win: tk.Toplevel, parent: tk.Misc) -> None:
 
 # ====================================================================== 帮助
 def show_help(parent: tk.Misc, theme: th.Theme) -> tk.Toplevel:
-    win = make_window(parent, theme, "操作说明", 780, 600)
+    win = make_window(parent, theme, "操作说明", 780, 760)
 
     header = tk.Frame(win, bg=th.BG)
     header.pack(fill="x", padx=24, pady=(20, 6))
@@ -140,15 +151,30 @@ def show_help(parent: tk.Misc, theme: th.Theme) -> tk.Toplevel:
     footer.pack(fill="x", padx=24, pady=(4, 18))
     tk.Label(
         footer,
-        text="提示：血量见底时优先喝药；每层至少有一瓶治疗药水；走遍全图再下楼能拿到更多装备。",
+        text="战场色块",
+        bg=th.BG, fg=th.ACCENT, font=theme.bold,
+    ).pack(anchor="w", pady=(0, 2))
+    for keys, desc in COMBAT_LEGEND:
+        row = tk.Frame(footer, bg=th.BG)
+        row.pack(fill="x")
+        tk.Label(
+            row, text=keys, bg=th.BG, fg=th.GOLD, font=theme.small, width=12, anchor="w"
+        ).pack(side="left")
+        tk.Label(
+            row, text=desc, bg=th.BG, fg=th.TEXT_DIM, font=theme.small, anchor="w"
+        ).pack(side="left")
+    tk.Label(
+        footer,
+        text="提示：先看红色区域决定站哪里，再决定这一回合是走位还是出手。重武器伤害高但要蓄力，"
+             "轻武器可以立刻打断敌人。",
         bg=th.BG,
         fg=th.TEXT_DIM,
         font=theme.small,
         wraplength=700,
         justify="left",
-    ).pack(anchor="w")
+    ).pack(anchor="w", pady=(8, 0))
     ttk.Button(footer, text="知道了", style="Accent.TButton", command=win.destroy).pack(
-        anchor="e", pady=(10, 0)
+        anchor="e", pady=(8, 0)
     )
 
     win.bind("<Escape>", lambda _e: win.destroy())

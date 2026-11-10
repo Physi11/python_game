@@ -32,7 +32,13 @@ class Player(Entity):
         self.gold: int = 0
         self.floor: int = 1
         self.inventory: list[Item] = []
-        self.equipment: dict[str, Item | None] = {"weapon": None, "armor": None}
+        # 三个装备槽：兵刃 / 弓 / 护甲。旧存档只有 weapon+armor，读档时补默认值
+        self.equipment: dict[str, Item | None] = {"weapon": None, "ranged": None, "armor": None}
+
+        # 蓄力状态：重武器出手前要花若干回合抬起，期间脚下会显示黄色预警
+        self.charge_left: int = 0
+        self.charge_weapon: str = ""
+        self.charge_tiles: set[tuple[int, int]] = set()
 
         # 本局统计计数器
         self.turns: int = 0
@@ -43,11 +49,22 @@ class Player(Entity):
         self.items_used: int = 0
 
     # ------------------------------------------------------------ 属性加成
-    def total_atk(self) -> int:
-        """基础攻击 + 武器加成。"""
-        weapon = self.equipment.get("weapon")
+    def weapon_in(self, slot: str) -> "Item | None":
+        """取某个槽位上的武器（``weapon`` 近战 / ``ranged`` 远程）。"""
+        return self.equipment.get(slot)
+
+    def attack_power(self, weapon: "Item | None") -> int:
+        """用指定武器出手时的攻击力 = 基础攻击 + 该武器加成。
+
+        注意只算**这一把**武器的加成：双槽并存时不能把两把武器的加成叠加，
+        否则"切换武器"就没有取舍了。
+        """
         bonus = getattr(weapon, "atk_bonus", 0) or 0
         return self.atk + bonus
+
+    def total_atk(self) -> int:
+        """面板展示用的攻击力：基础攻击 + 近战武器加成。"""
+        return self.attack_power(self.equipment.get("weapon"))
 
     def total_def(self) -> int:
         """基础防御 + 护甲加成。"""
@@ -121,8 +138,13 @@ class Player(Entity):
         return ok, message
 
     def equip(self, item: Item) -> None:
-        """装到对应装备槽。"""
-        slot = "weapon" if item.kind == "weapon" else "armor"
+        """装到对应装备槽。武器按 ``slot`` 分流到近战或远程槽。"""
+        if item.kind == "weapon":
+            slot = getattr(item, "slot", "melee")
+        elif item.kind == "armor":
+            slot = "armor"
+        else:
+            slot = "weapon"
         self.equipment[slot] = item
 
     def inventory_brief(self) -> list[str]:
@@ -149,18 +171,26 @@ class Player(Entity):
                     slot: (item.to_dict() if item is not None else None)
                     for slot, item in self.equipment.items()
                 },
+                "charge_left": self.charge_left,
+                "charge_weapon": self.charge_weapon,
+                "charge_tiles": [list(cell) for cell in sorted(self.charge_tiles)],
             }
         )
         return data
 
     @classmethod
     def create_new(cls, name: str = "冒险者") -> "Player":
-        """开新档：从配置读取初始属性并赠送两瓶小药水。"""
+        """开新档：从配置读取初始属性，赠送两瓶药水和一把旧剑。
+
+        新战斗系统要求"必须装备武器才能攻击"，所以初始必须给一把最基础的近战
+        武器，否则玩家在第 1 层连史莱姆都打不了。
+        """
         player = cls(name=name, hp=config.PLAYER_START_HP)
         from .item import make_item
 
         for _ in range(config.PLAYER_START_POTION):
             player.inventory.append(make_item("potion_small"))
+        player.equipment["weapon"] = make_item("sword_iron")
         return player
 
     @classmethod
@@ -187,8 +217,14 @@ class Player(Entity):
         player.items_used = int(data.get("items_used", 0))
         player.inventory = [item_from_dict(d) for d in data.get("inventory", [])]
         equipment = data.get("equipment") or {}
+        # 旧存档（v1）只有 weapon/armor，缺 ranged 时补 None，保证向后兼容
         player.equipment = {
-            "weapon": item_from_dict(equipment["weapon"]) if equipment.get("weapon") else None,
-            "armor": item_from_dict(equipment["armor"]) if equipment.get("armor") else None,
+            slot: (item_from_dict(equipment[slot]) if equipment.get(slot) else None)
+            for slot in ("weapon", "ranged", "armor")
+        }
+        player.charge_left = int(data.get("charge_left", 0))
+        player.charge_weapon = str(data.get("charge_weapon", ""))
+        player.charge_tiles = {
+            (int(pair[0]), int(pair[1])) for pair in data.get("charge_tiles", [])
         }
         return player

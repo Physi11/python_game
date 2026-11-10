@@ -1,114 +1,109 @@
 {
   "version": 1,
-  "说明": "把 24×24 的透明 PNG 放到 base_dir 下对应的 file 路径即可替换地图图标，无需改代码；文件不存在时自动回退成字符绘制。改完在游戏里按 F12 可立即重载。",
+  "说明": "把 24×24 的透明 PNG 放到 base_dir 下对应的 file 路径即可替换地图图标，无需改代码；文件缺失时自动回退成字符绘制。tint 会把白色剪影染成指定颜色。改完在游戏里按 F12 可立即重载。",
   "base_dir": "assets/icons",
   "entries": {
     "player": {
       "label": "玩家",
-      "file": "player.png"
+      "file": "player.png",
+      "tint": "#7ff0e0"
     },
 
     "monster.slime": {
       "label": "史莱姆",
-      "file": "monster/slime.png"
+      "file": "monster/slime.png",
+      "tint": "#e05a5a"
     },
     "monster.rat": {
       "label": "巨鼠",
-      "file": "monster/rat.png"
+      "file": "monster/rat.png",
+      "tint": "#e05a5a"
     },
     "monster.goblin": {
       "label": "哥布林",
-      "file": "monster/goblin.png"
+      "file": "monster/goblin.png",
+      "tint": "#e05a5a"
     },
     "monster.bat": {
       "label": "吸血蝙蝠",
-      "file": "monster/bat.png"
+      "file": "monster/bat.png",
+      "tint": "#e05a5a"
     },
     "monster.skeleton": {
       "label": "骷髅兵",
-      "file": "monster/skeleton.png"
+      "file": "monster/skeleton.png",
+      "tint": "#e05a5a"
     },
     "monster.gargoyle": {
       "label": "石像鬼",
-      "file": "monster/gargoyle.png"
+      "file": "monster/gargoyle.png",
+      "tint": "#e05a5a"
+    },
+    "monster.archer": {
+      "label": "弓兵",
+      "file": "monster/archer.png",
+      "tint": "#e05a5a"
+    },
+    "monster.spearman": {
+      "label": "长矛兵",
+      "file": "monster/spearman.png",
+      "tint": "#e05a5a"
+    },
+    "monster.swordsman": {
+      "label": "大刀兵",
+      "file": "monster/swordsman.png",
+      "tint": "#e05a5a"
     },
     "monster.demon_lord": {
       "label": "深渊领主（BOSS）",
-      "file": "monster/demon_lord.png"
-    },
-    "monster": {
-      "label": "怪物通用（没有专属图时用这张）",
-      "file": "monster/_default.png"
+      "file": "monster/demon_lord.png",
+      "tint": "#ff7a7a"
     },
 
-    "item.potion_small": {
-      "label": "小治疗药水",
-      "file": "item/potion_small.png"
+    "item.weapon": {
+      "label": "近战兵刃通用（剑类）",
+      "file": "item/sword.png",
+      "tint": "#c9d4e6"
     },
-    "item.potion_large": {
-      "label": "大治疗药水",
-      "file": "item/potion_large.png"
+    "item.spear_bone": {
+      "label": "骨矛（专属图标）",
+      "file": "item/spear.png",
+      "tint": "#c9d4e6"
     },
-    "item.sword_iron": {
-      "label": "铁剑",
-      "file": "item/sword_iron.png"
+    "item.greatsword": {
+      "label": "巨刃（专属图标）",
+      "file": "item/greatsword.png",
+      "tint": "#c9d4e6"
     },
-    "item.sword_rune": {
-      "label": "符文长剑",
-      "file": "item/sword_rune.png"
+    "item.bow_short": {
+      "label": "短弓（专属图标）",
+      "file": "item/bow.png",
+      "tint": "#c9d4e6"
     },
-    "item.blade_abyss": {
-      "label": "深渊之刃",
-      "file": "item/blade_abyss.png"
-    },
-    "item.armor_leather": {
-      "label": "皮甲",
-      "file": "item/armor_leather.png"
-    },
-    "item.armor_chain": {
-      "label": "锁子甲",
-      "file": "item/armor_chain.png"
-    },
-    "item.scroll_flare": {
-      "label": "烈焰卷轴",
-      "file": "item/scroll_flare.png"
-    },
-    "item.scroll_teleport": {
-      "label": "传送卷轴",
-      "file": "item/scroll_teleport.png"
-    },
-    "item.scroll_bless": {
-      "label": "祝福卷轴",
-      "file": "item/scroll_bless.png"
+    "item.bow_long": {
+      "label": "长弓（专属图标）",
+      "file": "item/bow.png",
+      "tint": "#c9d4e6"
     },
     "item.potion": {
       "label": "药水通用",
-      "file": "item/potion.png"
-    },
-    "item.weapon": {
-      "label": "武器通用",
-      "file": "item/weapon.png"
+      "file": "item/potion.png",
+      "tint": "#f0cf6b"
     },
     "item.armor": {
       "label": "护甲通用",
-      "file": "item/armor.png"
+      "file": "item/armor.png",
+      "tint": "#9fb3c8"
     },
     "item.scroll": {
       "label": "卷轴通用",
-      "file": "item/scroll.png"
+      "file": "item/scroll.png",
+      "tint": "#c79bf0"
     },
     "item": {
-      "label": "道具兜底（以上都没命中时用这张）",
-      "file": "item/_default.png"
-    },
-
-    "stair": {
-      "label": "下行楼梯",
-      "file": "object/stairs.png"
-    },
-    "door": {
-      "label": "门",
-      "file": "object/door.png"
+      "label": "道具兜底",
+      "file": "item/_default.png",
+      "tint": "#f0cf6b"
     }
   }
 }

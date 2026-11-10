@@ -258,6 +258,10 @@ class Dungeon:
                 return False
         return True
 
+    def has_line_of_sight(self, x0: int, y0: int, x1: int, y1: int) -> bool:
+        """公开的视线判断，供远程攻击与 AI 使用。"""
+        return self._has_line_of_sight(x0, y0, x1, y1)
+
     @staticmethod
     def _bresenham(x0: int, y0: int, x1: int, y1: int) -> list[tuple[int, int]]:
         """标准 Bresenham 直线算法，返回不含起点、含终点的格子序列。"""
