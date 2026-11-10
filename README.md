@@ -64,7 +64,10 @@ Windows 用户也可以直接双击 `run.bat`。
 
 ```
 main.py                  程序入口（环境自检 + 顶层异常兜底）
-run.bat                  双击启动
+run.bat                  双击启动游戏
+auto_sync.bat            双击启动"自动提交推送"监听
+.gitignore               版本库忽略规则
+.gitattributes           二进制文件与换行符声明
 dungeon/                 纯逻辑层，不依赖任何界面库
   config.py                全部常量与数值平衡参数
   rng.py                   随机数封装（种子 + 状态导出/恢复）
@@ -90,6 +93,7 @@ assets/
   icons.json               图标资源清单（唯一需要改的配置文件）
   icons/                   图标 PNG 放这里，缺图自动回退字符
 tools/                   辅助脚本
+  auto_sync.py             监听代码改动，自动提交并推送（带变更日志）
   balance_sim.py           无界面批量自动对局（冒烟测试 + 平衡验证）
   make_charts.py           导出图表 PNG 到 data/charts/
   draw_flowchart.py        绘制三张流程图到 docs/flowcharts/
@@ -97,7 +101,7 @@ tools/                   辅助脚本
   export_icon_slots.py     按清单导出 24×24 占位图标模板（可选）
 tests/                   单元测试（unittest，无需显示器）
 data/                    运行时数据（存档、战绩、图表）
-docs/                    实验报告、流程图、界面截图
+docs/                    实验报告、流程图、界面截图、提交规范
 ```
 
 ---
