@@ -8,6 +8,10 @@ Python 课程大作业：一个用 **纯 Python + tkinter** 实现的回合制�
 ## 快速开始
 
 ```bash
+# 0) 克隆仓库
+git clone https://github.com/Physi11/python_game.git
+cd python_game
+
 # 1) 安装依赖（只有图表功能需要，游戏本体仅依赖标准库）
 pip install -r requirements.txt
 
