@@ -1,0 +1,115 @@
+test_icon_manifest_module_is_headless (test_architecture.TestLayerSeparation.test_icon_manifest_module_is_headless)
+``ui/icons.py`` 必须保持纯数据操作，否则图标测试就需要显示器了。 ... ok
+test_logic_layer_has_no_gui_imports (test_architecture.TestLayerSeparation.test_logic_layer_has_no_gui_imports) ... ok
+test_ui_layer_has_no_rule_logic (test_architecture.TestLayerSeparation.test_ui_layer_has_no_rule_logic)
+界面层不应该出现伤害公式、地图生成之类的规则代码。 ... ok
+test_log_entry_shape (test_architecture.TestModuleSurface.test_log_entry_shape)
+日志条目必须是 (文本, 分类) 二元组，界面层依赖这个约定着色。 ... ok
+test_package_exports (test_architecture.TestModuleSurface.test_package_exports) ... ok
+test_descend_without_stairs (test_boundary.TestCombatBoundary.test_descend_without_stairs)
+没有楼梯 / 不在楼梯上时下楼请求应被拒绝。 ... ok
+test_player_death_sets_status (test_boundary.TestCombatBoundary.test_player_death_sets_status)
+玩家血量被打空后，状态机应切到 dead 并记录死因。 ... ok
+test_turn_limit_triggers_timeout (test_boundary.TestCombatBoundary.test_turn_limit_triggers_timeout)
+回合数超过上限时自动结算，避免玩家无限挂机。 ... ok
+test_boss_floor_has_boss_and_no_stairs (test_boundary.TestFloorScaling.test_boss_floor_has_boss_and_no_stairs)
+BOSS 层必须有深渊领主，且不设下行楼梯（否则可以绕过 BOSS）。 ... ok
+test_boss_stats_are_fixed (test_boundary.TestFloorScaling.test_boss_stats_are_fixed)
+BOSS 数值不随层数缩放，保证最终战斗强度可预期。 ... ok
+test_deeper_floor_monsters_are_stronger (test_boundary.TestFloorScaling.test_deeper_floor_monsters_are_stronger)
+第 10 层的小怪必须明显强于第 1 层的同类。 ... ok
+test_inventory_full_rejects_pickup (test_boundary.TestInventoryLimit.test_inventory_full_rejects_pickup) ... ok
+test_potion_at_full_hp_rejected (test_boundary.TestItemValidation.test_potion_at_full_hp_rejected)
+满血喝药返回失败原因，且道具不会被消耗。 ... ok
+test_unknown_item_key_in_save (test_boundary.TestItemValidation.test_unknown_item_key_in_save)
+存档里出现未知道具时抛 ValueError，由存档层转成可读提示。 ... ok
+test_use_item_on_empty_inventory (test_boundary.TestItemValidation.test_use_item_on_empty_inventory)
+空背包取用道具不能抛 IndexError。 ... ok
+test_use_item_with_bad_index (test_boundary.TestItemValidation.test_use_item_with_bad_index)
+负数索引、超出范围的索引、非整数索引都要被拦下。 ... ok
+test_invalid_direction_rejected (test_boundary.TestMovementValidation.test_invalid_direction_rejected)
+斜向移动和零位移都属于非法输入。 ... ok
+test_move_into_wall_does_not_consume_turn (test_boundary.TestMovementValidation.test_move_into_wall_does_not_consume_turn)
+撞墙时返回 False，回合数与坐标都不变。 ... ok
+test_normal_move_consumes_turn (test_boundary.TestMovementValidation.test_normal_move_consumes_turn)
+合法移动应推进回合数并记录步数。 ... ok
+test_out_of_bounds_is_safe (test_boundary.TestMovementValidation.test_out_of_bounds_is_safe)
+越界坐标查询不会抛异常，一律视为不可通行。 ... ok
+test_descend_after_using_item (test_boundary.TestStairsInteraction.test_descend_after_using_item)
+用过道具后仍能正常下楼（原本被键盘焦点问题挡住的路径）。 ... ok
+test_descend_from_stairs_goes_down (test_boundary.TestStairsInteraction.test_descend_from_stairs_goes_down)
+站在楼梯上 descend() 应当换层，且玩家落在新地图的可走格上。 ... ok
+test_interact_on_stairs_does_not_consume_turn (test_boundary.TestStairsInteraction.test_interact_on_stairs_does_not_consume_turn)
+interact() 只提示、不推进回合——这是"下楼分流放在界面层"的依据。 ... ok
+test_critical_hit_multiplies_damage (test_combat.TestDamageFormula.test_critical_hit_multiplies_damage)
+命中且暴击时，伤害 = 基础伤害 × 暴击倍率（四舍五入）。 ... ok
+test_damage_floor_is_one (test_combat.TestDamageFormula.test_damage_floor_is_one)
+高防打低攻时，伤害必须保底为 1 点，不能出现 0 或负数。 ... ok
+test_miss_returns_zero_damage (test_combat.TestDamageFormula.test_miss_returns_zero_damage)
+落空时伤害为 0 且标记 hit=False。 ... ok
+test_negative_parameters_rejected (test_combat.TestDamageFormula.test_negative_parameters_rejected)
+攻击力/防御力为负属于非法输入，必须抛异常而不是算出怪结果。 ... ok
+test_normal_damage (test_combat.TestDamageFormula.test_normal_damage) ... ok
+test_equipment_affects_stats (test_combat.TestEntityBehavior.test_equipment_affects_stats)
+装备武器护甲后，总攻击与总防御应等于基础值加加成。 ... ok
+test_heal_capped_at_max_hp (test_combat.TestEntityBehavior.test_heal_capped_at_max_hp)
+满血喝药不应溢出，实际回复量为 0。 ... ok
+test_multi_level_up (test_combat.TestEntityBehavior.test_multi_level_up)
+一次给大量经验应该连续升级，且血量回满、等级不越界。 ... ok
+test_negative_amount_rejected (test_combat.TestEntityBehavior.test_negative_amount_rejected)
+负数伤害/治疗属于非法参数，必须抛 ValueError。 ... ok
+test_take_damage_and_death (test_combat.TestEntityBehavior.test_take_damage_and_death)
+扣血到 0 时血量钳制在 0，并标记为死亡。 ... ok
+test_map_fully_connected (test_dungeon.TestDungeonGeneration.test_map_fully_connected)
+从玩家出生点出发，必须能走到楼梯和每个房间中心。 ... ok
+test_rooms_no_overlap (test_dungeon.TestDungeonGeneration.test_rooms_no_overlap)
+100 个随机种子下，任意两个房间外扩 1 格后都不相交。 ... ok
+test_serialization_roundtrip (test_dungeon.TestDungeonGeneration.test_serialization_roundtrip)
+地图导出成字符串后再解析回来，必须完全一致。 ... ok
+test_spawn_positions_valid (test_dungeon.TestDungeonGeneration.test_spawn_positions_valid)
+游戏开局时，玩家/怪物/道具都落在可走格上，且互不重叠。 ... ok
+test_stairs_not_at_spawn (test_dungeon.TestDungeonGeneration.test_stairs_not_at_spawn)
+楼梯不应该贴脸生成，至少离出生点 10 步以上。 ... ok
+test_stairs_tile_is_walkable (test_dungeon.TestDungeonGeneration.test_stairs_tile_is_walkable)
+楼梯格本身必须是可通行的地形。 ... ok
+test_explored_accumulates (test_dungeon.TestFieldOfView.test_explored_accumulates)
+走过的区域会进入 explored，即使离开视野也不会消失。 ... ok
+test_fov_blocked_by_wall (test_dungeon.TestFieldOfView.test_fov_blocked_by_wall)
+墙后面的格子不应该进入视野。 ... ok
+test_exact_key_wins (test_icons.TestLookup.test_exact_key_wins)
+专属图标存在时，不能退到类别或通用。 ... ok
+test_falls_back_to_kind (test_icons.TestLookup.test_falls_back_to_kind) ... ok
+test_falls_back_to_root (test_icons.TestLookup.test_falls_back_to_root) ... ok
+test_item_candidates_order (test_icons.TestLookup.test_item_candidates_order) ... ok
+test_monster_candidates_order (test_icons.TestLookup.test_monster_candidates_order) ... ok
+test_unknown_key_returns_none (test_icons.TestLookup.test_unknown_key_returns_none)
+清单里一条都没有时返回 None，由调用方回退到字符绘制。 ... ok
+test_absolute_or_non_png_file_is_skipped (test_icons.TestManifestLoading.test_absolute_or_non_png_file_is_skipped)
+绝对路径会把工程绑死在本机，非 png 则可能加载不了，一律拒绝。 ... ok
+test_base_dir_is_resolved_against_project_root (test_icons.TestManifestLoading.test_base_dir_is_resolved_against_project_root) ... ok
+test_entry_without_file_is_skipped (test_icons.TestManifestLoading.test_entry_without_file_is_skipped)
+缺 file 字段的条目不参与匹配，避免"声明了却永远加载不到"。 ... ok
+test_invalid_json_raises_typed_error (test_icons.TestManifestLoading.test_invalid_json_raises_typed_error)
+坏 JSON 抛 IconManifestError，而不是让 json 的异常直接冒出去。 ... ok
+test_missing_file_returns_empty (test_icons.TestManifestLoading.test_missing_file_returns_empty)
+清单不存在时返回空表，游戏照常运行（全部回退字符）。 ... ok
+test_shipped_manifest_is_valid (test_icons.TestManifestLoading.test_shipped_manifest_is_valid)
+项目自带的那份清单必须能正常解析，且每条都是相对 .png。 ... ok
+test_unsupported_version_rejected (test_icons.TestManifestLoading.test_unsupported_version_rejected) ... ok
+test_corrupted_json_raises_and_backs_up (test_save.TestSaveAbnormal.test_corrupted_json_raises_and_backs_up) ... ok
+test_invalid_slot_number (test_save.TestSaveAbnormal.test_invalid_slot_number) ... ok
+test_load_empty_slot_raises (test_save.TestSaveAbnormal.test_load_empty_slot_raises) ... ok
+test_missing_required_field (test_save.TestSaveAbnormal.test_missing_required_field)
+删掉 player 字段后应报"内容不完整"而不是 KeyError 崩溃。 ... ok
+test_records_append_and_load (test_save.TestSaveAbnormal.test_records_append_and_load) ... ok
+test_version_too_new (test_save.TestSaveAbnormal.test_version_too_new) ... ok
+test_list_meta (test_save.TestSaveRoundtrip.test_list_meta) ... ok
+test_rng_state_reproducible (test_save.TestSaveRoundtrip.test_rng_state_reproducible)
+读档后的随机序列必须与存档时完全一致。 ... ok
+test_roundtrip_keeps_state (test_save.TestSaveRoundtrip.test_roundtrip_keeps_state) ... ok
+test_save_then_delete (test_save.TestSaveRoundtrip.test_save_then_delete) ... ok
+
+----------------------------------------------------------------------
+Ran 64 tests in 0.270s
+
+OK

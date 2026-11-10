@@ -1,0 +1,5 @@
+# 运行游戏本体只需要 Python 3.10+ 与标准库 tkinter
+# matplotlib / pandas 用于统计图表；pillow 用于图标缩放与自动截图
+matplotlib>=3.7
+pandas>=2.0
+pillow>=10.0

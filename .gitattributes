@@ -1,0 +1,14 @@
+# 明确声明二进制文件，避免 Git 把它们当文本做行尾转换或生成无意义的行级 diff
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.docx  binary
+*.xlsx  binary
+*.pdf   binary
+*.pyc   binary
+
+# Windows 批处理必须是 CRLF，否则某些环境下会被 cmd 解析出错
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
