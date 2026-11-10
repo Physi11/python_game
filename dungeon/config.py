@@ -28,6 +28,14 @@ PLAYER_START_DEF: int = 1
 PLAYER_START_POTION: int = 2    # 开局携带的小治疗药水数量
 INVENTORY_CAPACITY: int = 24    # 背包格数
 
+# ---------------------------------------------------------------- 装备合成
+# 同名装备拾取时自动合成升级：等级 +1、攻击/防御 +1，直到上限。
+# 上限取 3 让"铁剑 +3（+5）"正好落在符文长剑（+4）与深渊之刃（+7）之间，
+# 避免靠堆数量反超深层装备。
+UPGRADE_MAX_LEVEL: int = 3
+UPGRADE_ATK_PER_LEVEL: int = 1
+UPGRADE_DEF_PER_LEVEL: int = 1
+
 # ---------------------------------------------------------------- 楼层
 MAX_FLOOR: int = 10             # 最深一层
 BOSS_FLOOR: int = 10            # BOSS 所在层

@@ -18,6 +18,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable
 
+from . import config
+
 if TYPE_CHECKING:  # 仅用于类型检查，避免运行时循环导入
     from .player import Player
     from .rng import Rng
@@ -41,6 +43,11 @@ class Item(ABC):
         约定：**永远不抛异常**。背包为空、道具不适用等异常情况一律通过
         返回值表达，由界面层弹出提示。这是"输入验证"评分点的关键设计。
         """
+
+    @property
+    def title(self) -> str:
+        """显示名。武器/护甲会覆盖它来带强化等级（如「铁剑 +2」）。"""
+        return self.name
 
     def describe(self) -> str:
         return f"{self.name} —— {self.desc}"
@@ -105,11 +112,28 @@ class Weapon(Item):
     ) -> None:
         super().__init__(key, name, desc)
         self.atk_bonus = int(atk_bonus)
+        self._base_atk = int(atk_bonus)      # 合成前的基础攻击，重放等级时用
         self.slot = slot
         self.pattern = pattern
         self.reach = int(reach)
         self.charge = int(charge)
         self.min_reach = int(min_reach)
+        self.upgrade_level: int = 0          # 强化等级，合成时 +1
+
+    @property
+    def title(self) -> str:
+        """显示名，带强化等级（如「铁剑 +2」）。"""
+        return f"{self.name} +{self.upgrade_level}" if self.upgrade_level else self.name
+
+    def restore_upgrade(self, level: int) -> None:
+        """按存档里的强化等级重放，并截断到上限。
+
+        合成只改动 ``upgrade_level``，``atk_bonus`` 是基础值 + 每级加成。
+        所以读档时只需按等级重放加成，不必存储最终攻击力——这也顺带封死了
+        "手改存档里的 atk_bonus 造神装"这条路。
+        """
+        self.upgrade_level = max(0, min(int(level), config.UPGRADE_MAX_LEVEL))
+        self.atk_bonus = self._base_atk + self.upgrade_level * config.UPGRADE_ATK_PER_LEVEL
 
     @property
     def slot_name(self) -> str:
@@ -142,11 +166,12 @@ class Weapon(Item):
     def to_dict(self) -> dict[str, Any]:
         data = super().to_dict()
         data["atk_bonus"] = self.atk_bonus
+        data["upgrade"] = self.upgrade_level
         return data
 
 
 class Armor(Item):
-    """护甲，装备后提升防御力。"""
+    """护甲，装备后提升防御力。同名护甲可合成升级。"""
 
     kind = "armor"
     glyph = "["
@@ -154,6 +179,16 @@ class Armor(Item):
     def __init__(self, key: str, name: str, desc: str, def_bonus: int) -> None:
         super().__init__(key, name, desc)
         self.def_bonus = int(def_bonus)
+        self._base_def = int(def_bonus)
+        self.upgrade_level: int = 0
+
+    @property
+    def title(self) -> str:
+        return f"{self.name} +{self.upgrade_level}" if self.upgrade_level else self.name
+
+    def restore_upgrade(self, level: int) -> None:
+        self.upgrade_level = max(0, min(int(level), config.UPGRADE_MAX_LEVEL))
+        self.def_bonus = self._base_def + self.upgrade_level * config.UPGRADE_DEF_PER_LEVEL
 
     def apply(self, player: "Player", state: Any = None) -> tuple[bool, str]:
         old = player.equipment.get("armor")
@@ -167,6 +202,7 @@ class Armor(Item):
     def to_dict(self) -> dict[str, Any]:
         data = super().to_dict()
         data["def_bonus"] = self.def_bonus
+        data["upgrade"] = self.upgrade_level
         return data
 
 
@@ -356,6 +392,7 @@ def item_from_dict(data: dict[str, Any]) -> Item:
 
     只信任 ``key``，其余数值一律以数据表重建：这样即使有人手改了存档里的
     ``heal_amount``，也无法凭空造出"回复 9999 点"的作弊药水。
+    ``upgrade`` 字段会经 ``restore_upgrade`` 截断到上限，改到 99 也只得到 +3。
     """
     try:
         key = data["key"]
@@ -363,7 +400,10 @@ def item_from_dict(data: dict[str, Any]) -> Item:
         raise ValueError(f"道具数据缺少 key 字段：{exc}") from exc
     if key not in _ITEM_DEFS:
         raise ValueError(f"存档中存在未知道具：{key}")
-    return make_item(key)
+    item = make_item(key)
+    if isinstance(item, (Weapon, Armor)) and "upgrade" in data:
+        item.restore_upgrade(data["upgrade"])
+    return item
 
 
 ITEM_FACTORY: dict[str, Callable[[dict[str, Any]], Item]] = {

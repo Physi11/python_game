@@ -32,6 +32,9 @@ class MapView(tk.Canvas):
     FLOAT_STEP = 2            # 每帧上移像素
     FLOAT_FRAMES = 14         # 飘字存活帧数
 
+    BADGE_W = 14              # 倒计时徽章尺寸，必须小于 TILE，才能整个画在格子内
+    BADGE_H = 11              # 放在格子右上角：只压住图标一角，不挡住整体轮廓
+
     def __init__(
         self,
         master: tk.Misc,
@@ -69,6 +72,11 @@ class MapView(tk.Canvas):
         self._badges: dict[tuple[int, int], tuple[int, int]] = {}
         self._aim_items: dict[tuple[int, int], int] = {}
         self._aim_cells: set[tuple[int, int]] = set()
+        # 逐敌配色：每只怪物一种威胁色，键用 id(monster)
+        self._threat_color: dict[int, str] = {}
+        self._threat_slot: int = 0
+        self._threat_edges: dict[int, list[int]] = {}   # id(monster) -> 描边 line item 列表
+        self._edge_signature: dict[int, tuple] = {}  # 描边的内容签名，用于跳过无变化重画
 
         self._build_grid()
         self._hover_box = self.create_rectangle(
@@ -121,6 +129,9 @@ class MapView(tk.Canvas):
             if cell in self._overlay_items:
                 self.itemconfig(self._overlay_items[cell], state="hidden")
         self._threat_cells.clear()
+        self._clear_threat_edges()
+        self._threat_color.clear()
+        self._threat_slot = 0
         self.refresh(force=True)
 
     def refresh(self, force: bool = False) -> None:
@@ -171,6 +182,7 @@ class MapView(tk.Canvas):
         self.tag_raise(self._hover_box)
         self.tag_raise(self._player_ring)
         self.tag_raise("aim")
+        self.tag_raise("threat_edge")
         self.tag_raise("badge")
 
     # ------------------------------------------------------------ 威胁与瞄准图层
@@ -189,15 +201,43 @@ class MapView(tk.Canvas):
         self.itemconfig(item, fill=color, outline=color, tags=(tag,), state="normal")
         return item
 
+    def _threat_color_for(self, monster: Any) -> str:
+        """给一只怪物分配（或取回）它专属的威胁色。
+
+        键用 ``id(monster)``：怪物被打死后会从 ``state.monsters`` 里移除，
+        用列表下标当键会让剩下的敌人"换色"。敌人死后由 ``_sync_threat_overlays``
+        统一清理，新出现的敌人接着用下一个色位。
+        """
+        key = id(monster)
+        color = self._threat_color.get(key)
+        if color is None:
+            palette = th.THREAT_PALETTE
+            color = palette[self._threat_slot % len(palette)]
+            self._threat_slot += 1
+            self._threat_color[key] = color
+        return color
+
     def _sync_threat_overlays(self) -> None:
-        """红色 = 敌人已锁定的打击区域；黄色 = 玩家自己的蓄力区域。"""
+        """威胁区底色：每只敌人一种颜色；玩家自己的蓄力仍然是金色。"""
         state = self.state
         wanted: dict[tuple[int, int], str] = {}
+        owners: list[tuple[Any, str]] = []
         if state is not None:
+            # 先清掉已经不在场上的敌人：id() 会被新对象复用，
+            # 留着旧键会让新怪物凭空继承上一个死者的颜色
+            alive_ids = {id(monster) for monster in state.monsters}
+            for key in list(self._threat_color):
+                if key not in alive_ids:
+                    self._threat_color.pop(key)
             for monster in state.monsters:
-                if monster.alive and monster.telegraph:
-                    for cell in monster.telegraph:
-                        wanted[cell] = th.THREAT
+                if not (monster.alive and monster.telegraph):
+                    continue
+                color = self._threat_color_for(monster)
+                owners.append((monster, color))
+                for cell in monster.telegraph:
+                    # 两片区域重叠时后画的覆盖先画的；重叠格到底算谁的，
+                    # 由下面不同颜色的描边在同一格交汇来体现。
+                    wanted[cell] = color
             if state.player.charge_left > 0:
                 for cell in state.player.charge_tiles:
                     wanted[cell] = th.CHARGE
@@ -207,43 +247,122 @@ class MapView(tk.Canvas):
         for cell, color in wanted.items():
             self._overlay(cell, color, "threat")
         self._threat_cells = set(wanted)
+        self._sync_threat_edges(owners)
+
+    def _sync_threat_edges(self, owners: list[tuple[Any, str]]) -> None:
+        """沿每片威胁区的外轮廓画实线，用来回答"这片范围是谁的"。
+
+        只有底色时，两片相邻的同色/近色区域会糊成一团；给每片区域描一圈
+        与它同色的实线边界，交界处自然出现分界线，重叠格也能靠两条不同
+        颜色的边看出归属。
+
+        每条外露边画成一条独立的短线段，统一挂 ``threat_edge`` 标签；这样
+        既避免了把不连通的边界连成横穿区域的斜线，删除时也能按标签整体清掉。
+        """
+        alive: set[int] = set()
+        for monster, color in owners:
+            key = id(monster)
+            alive.add(key)
+            tiles = frozenset(monster.telegraph)
+            signature = (color, tuple(sorted(tiles)))
+            if self._edge_signature.get(key) == signature:
+                continue
+            # 内容变了：删掉旧描边，重画
+            for item in self._threat_edges.pop(key, []):
+                self.delete(item)
+            coords = self._outline_segments(tiles)
+            items: list[int] = []
+            for x0, y0, x1, y1 in coords:
+                items.append(
+                    self.create_line(
+                        x0, y0, x1, y1, fill=color, width=2,
+                        tags=("threat_edge",)
+                    )
+                )
+            self._threat_edges[key] = items
+            self._edge_signature[key] = signature
+        for key in list(self._threat_edges):
+            if key not in alive:
+                for item in self._threat_edges.pop(key, []):
+                    self.delete(item)
+                self._edge_signature.pop(key, None)
+
+    def _outline_segments(self, tiles: frozenset[tuple[int, int]]) -> list[tuple[float, float, float, float]]:
+        """返回一组格子外轮廓的独立线段（每条边一段）。"""
+        if not tiles:
+            return []
+        edges: set[tuple[float, float, float, float]] = set()
+        for x, y in tiles:
+            x0, y0 = float(x * TILE), float(y * TILE)
+            x1, y1 = x0 + TILE, y0 + TILE
+            for edge in (
+                (x0, y0, x1, y0),   # 上
+                (x0, y1, x1, y1),   # 下
+                (x0, y0, x0, y1),   # 左
+                (x1, y0, x1, y1),   # 右
+            ):
+                edges ^= {edge}      # 共享边出现两次会抵消，只留外轮廓
+        return sorted(edges)
+
+    def _clear_threat_edges(self) -> None:
+        for items in self._threat_edges.values():
+            for item in items:
+                self.delete(item)
+        self._threat_edges.clear()
+        self._edge_signature.clear()
 
     def _sync_charge_badges(self) -> None:
-        """敌人头顶的"还有几回合出手"倒计时。
+        """敌人格子右上角的"还有几回合出手"倒计时。
 
-        数字直接写在格子上会被红色预告块吃掉对比度，所以做成
-        "深色小圆角底 + 亮红数字"的徽章，压在格子顶部。
+        位置约束是这里的关键：徽章绝不能画到上一格去。早先把它放在
+        ``y*TILE - 6``，结果敌人贴着墙站时上半截压在墙上，看起来就像被墙
+        吃掉一半；24px 的格子里也没有多余空间可以外扩。现在整个收进格子
+        右上角（``BADGE_W/H`` 都小于 ``TILE``），无论上下左右是什么地形都不越界。
+
+        徽章描边用这只敌人的威胁色，数字固定白色保证可读——敌人多时靠
+        颜色把"还剩几回合"和"哪片范围"对应起来。
         """
         state = self.state
-        wanted: dict[tuple[int, int], str] = {}
+        wanted: dict[tuple[int, int], tuple[str, str]] = {}
         if state is not None:
             for monster in state.monsters:
                 if monster.alive and monster.charge_left > 0:
-                    wanted[monster.pos] = str(monster.charge_left)
+                    wanted[monster.pos] = (
+                        str(monster.charge_left),
+                        self._threat_color_for(monster),
+                    )
 
         for cell in list(set(self._badges) - set(wanted)):
             for item in self._badges.pop(cell):
                 self.delete(item)
 
-        for cell, text in wanted.items():
+        half = self.BADGE_W / 2
+        for cell, (text, color) in wanted.items():
             x, y = cell
-            cx = x * TILE + TILE / 2
-            top = y * TILE - 6
+            # 贴在格子右上角，左上角坐标紧贴整数边界，绝不越出格子
+            right = x * TILE + TILE - 1
+            top = y * TILE + 1
+            left = right - self.BADGE_W
+            bottom = top + self.BADGE_H
+            cx = (left + right) / 2
             pair = self._badges.get(cell)
             if pair is None:
                 rect = self.create_rectangle(
-                    cx - 7, top, cx + 7, top + 13,
-                    fill="#141821", outline=th.THREAT, width=1, tags=("badge",),
+                    left, top, right, bottom,
+                    fill=th.THREAT_BADGE_BG, outline=color, width=1, tags=("badge",),
                 )
+                # 数字固定用白色：红/橙/品红这些威胁色直接写字会糊在图标上，
+                # 颜色改由边框表达，数字只负责"读得清"。
                 label = self.create_text(
-                    cx, top + 6, text=text, fill=th.THREAT_TEXT,
-                    font=self.theme.tiny, tags=("badge",),
+                    cx, (top + bottom) / 2, text=text, fill=th.THREAT_BADGE_TEXT,
+                    font=self.theme.map_badge, tags=("badge",),
                 )
                 self._badges[cell] = (rect, label)
             else:
                 rect, label = pair
-                self.coords(rect, cx - 7, top, cx + 7, top + 13)
-                self.coords(label, cx, top + 6)
+                self.coords(rect, left, top, right, bottom)
+                self.coords(label, cx, (top + bottom) / 2)
+                self.itemconfig(rect, outline=color)
                 self.itemconfig(label, text=text)
 
     def show_aim(self, cells: frozenset[tuple[int, int]], valid: bool = True) -> None:

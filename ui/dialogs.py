@@ -39,9 +39,9 @@ HELP_ROWS = [
 # 战斗配色说明，单独一段，避免塞进按键表里
 COMBAT_LEGEND = [
     ("蓝色高亮", "你这一击会覆盖的格子（瞄准时实时预览）"),
-    ("红色高亮", "敌人已经锁定的打击区域，站进去就会挨打"),
-    ("黄色高亮", "你自己的蓄力区域，重武器会在下回合落下"),
-    ("头顶数字", "敌人还有几回合出手；数字归零的那一回合结算"),
+    ("彩色高亮", "敌人锁定的打击区域；每只敌人一种颜色，描边圈出的就是它的范围"),
+    ("金色高亮", "你自己的蓄力区域，重武器会在下回合落下"),
+    ("格子右上角数字", "该敌人还有几回合出手，数字边框的颜色与它那片范围一致"),
 ]
 
 
@@ -165,8 +165,9 @@ def show_help(parent: tk.Misc, theme: th.Theme) -> tk.Toplevel:
         ).pack(side="left")
     tk.Label(
         footer,
-        text="提示：先看红色区域决定站哪里，再决定这一回合是走位还是出手。重武器伤害高但要蓄力，"
-             "轻武器可以立刻打断敌人。",
+        text="提示：先看彩色区域决定站哪里，再决定这一回合是走位还是出手。重武器伤害高但要蓄力，"
+             "轻武器可以立刻打断敌人。捡到同名装备会自动合成升级（最高 +3），"
+             "所以重复掉落也不是废品。",
         bg=th.BG,
         fg=th.TEXT_DIM,
         font=theme.small,
@@ -225,7 +226,7 @@ def show_inventory(
     listing.pack(fill="both", expand=True, padx=4, pady=4)
     if player.inventory:
         for index, item in enumerate(player.inventory, start=1):
-            listing.insert("end", f" {index}.  {item.glyph}  {item.name}")
+            listing.insert("end", f" {index}.  {item.glyph}  {item.title}")
         listing.selection_set(0)
     else:
         listing.insert("end", " （背包是空的）")
@@ -259,7 +260,7 @@ def show_inventory(
         if index >= len(player.inventory):
             return
         item = player.inventory[index]
-        detail_title.config(text=f"{item.glyph}  {item.name}")
+        detail_title.config(text=f"{item.glyph}  {item.title}")
         detail_text.config(text=f"类型：{_kind_name(item.kind)}\n\n{item.desc}")
 
     def use_selected(_event: tk.Event | None = None) -> None:

@@ -50,6 +50,18 @@ THREAT = "#e5484d"
 THREAT_TEXT = "#ffb3b5"
 CHARGE = "#e8c45a"
 
+# 多只敌人同时蓄力时，按出现顺序给每只分配一种颜色，范围描边与头顶数字同色。
+# 刻意避开蓝色（玩家瞄准）和金色（自己蓄力），否则三类高亮会混在一起。
+THREAT_PALETTE = (
+    "#ff5c5c",   # 红
+    "#ff9d3d",   # 橙
+    "#ff6bd6",   # 品红
+    "#b98cff",   # 紫
+    "#4ddba0",   # 青绿
+)
+THREAT_BADGE_BG = "#0a0c11"     # 倒计时徽章底色，比任何地板都深，保证数字对比度
+THREAT_BADGE_TEXT = "#ffffff"   # 数字用纯白：威胁色写字会在彩色图标上糊掉
+
 # 实体
 C_PLAYER = "#7ff0e0"
 C_MONSTER = "#e05a5a"
@@ -117,6 +129,7 @@ class Theme:
         self.subtitle = (self.family, 11)
         self.map_glyph = (self.family, 13, "bold")
         self.map_text = (self.family, 11)
+        self.map_badge = (self.family, 7, "bold")
 
     def apply(self, root: tk.Misc) -> None:
         """统一 ttk 控件样式。"""

@@ -182,18 +182,18 @@ class StatusPanel(ttk.Frame):
         armor = player.equipment.get("armor")
         self.lbl_weapon.config(
             text=(
-                f"近战：{melee.name}（+{melee.atk_bonus} · {melee.range_text}）"
+                f"近战：{melee.title}（+{melee.atk_bonus} · {melee.range_text}）"
                 if melee else "近战：—"
             )
         )
         self.lbl_ranged.config(
             text=(
-                f"远程：{ranged.name}（+{ranged.atk_bonus} · {ranged.range_text}）"
+                f"远程：{ranged.title}（+{ranged.atk_bonus} · {ranged.range_text}）"
                 if ranged else "远程：—"
             )
         )
         self.lbl_armor.config(
-            text=f"护甲：{armor.name}（+{armor.def_bonus}）" if armor else "护甲：—"
+            text=f"护甲：{armor.title}（+{armor.def_bonus}）" if armor else "护甲：—"
         )
         if player.charge_left > 0:
             self.lbl_charge.config(text=f"⚡ 蓄力中，{player.charge_left} 回合后落下")
@@ -201,7 +201,7 @@ class StatusPanel(ttk.Frame):
             self.lbl_charge.config(text="")
 
         # 背包重新填充；只在内容变化时重建，避免每次刷新都打断选中状态
-        entries = [f"{i + 1}. {item.glyph} {item.name}" for i, item in enumerate(player.inventory)]
+        entries = [f"{i + 1}. {item.glyph} {item.title}" for i, item in enumerate(player.inventory)]
         if entries != list(self.item_list.get(0, "end")):
             # 用"道具对象身份"而不是下标恢复选中：用掉一件道具后列表会变短，
             # 沿用旧下标会指向另一件道具，再双击就用到错的东西

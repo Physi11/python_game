@@ -111,11 +111,57 @@ class Player(Entity):
 
     # ------------------------------------------------------------ 背包
     def pick_up(self, item: Item) -> tuple[bool, str]:
-        """拾取道具。背包满时返回失败原因，不抛异常。"""
+        """拾取道具。同名装备会自动合成升级，背包满时返回失败原因，不抛异常。
+
+        合成放在"背包容量检查"之前：背包满时若不合成，玩家会既捡不起又
+        用不上，两套规则互相打架。合成规则：同名武器/护甲且未满级，等级 +1、
+        攻击（或防御）+1，优先合身上穿着的，再合背包里等级更高的那件。
+        """
+        from .item import Armor, Weapon
+
+        merged = self._try_merge_equipment(item, Weapon, Armor)
+        if merged is not None:
+            return True, merged
+
         if len(self.inventory) >= config.INVENTORY_CAPACITY:
             return False, f"背包已满（{config.INVENTORY_CAPACITY} 格），无法拾取"
         self.inventory.append(item)
         return True, f"拾取了{item.name}"
+
+    def _try_merge_equipment(self, item: Item, weapon_cls: type, armor_cls: type) -> str | None:
+        """尝试把同名装备合进已有的一件；成功返回提示文本，否则返回 None。
+
+        只处理武器与护甲，药水和卷轴直接跳过。候选顺序：身上穿着的优先
+        （让"第二把铁剑"立刻变成攻击力），再挑背包里等级最高的那件。
+        """
+        if not isinstance(item, (weapon_cls, armor_cls)):
+            return None
+        if item.upgrade_level >= config.UPGRADE_MAX_LEVEL:
+            return None
+
+        if isinstance(item, weapon_cls):
+            # 武器 slot 是 "melee"/"ranged"，但装备槽的键是 "weapon"/"ranged"，
+            # 需要映射：melee 武器挂在 equipment["weapon"] 上
+            equip_slot = "weapon" if item.slot == "melee" else item.slot
+            candidates = [
+                self.equipment.get(equip_slot),
+                *(i for i in self.inventory if isinstance(i, weapon_cls) and i.slot == item.slot),
+            ]
+        else:
+            candidates = [
+                self.equipment.get("armor"),
+                *(i for i in self.inventory if isinstance(i, armor_cls)),
+            ]
+        candidates = [c for c in candidates if c is not None and c.key == item.key]
+        if not candidates:
+            return None
+        # 等级取较高者 +1，再截断到上限
+        target = max(candidates, key=lambda c: c.upgrade_level)
+        if target.upgrade_level >= config.UPGRADE_MAX_LEVEL:
+            return None
+        # 用 restore_upgrade 统一重放加成，保证合成与读档两条路径数值一致
+        target.restore_upgrade(target.upgrade_level + 1)
+        return f"捡到同款{target.name}，自动合成升级为 {target.title}"
 
     def use_item(self, index: int, state: Any = None) -> tuple[bool, str]:
         """使用背包第 ``index`` 格的道具。
