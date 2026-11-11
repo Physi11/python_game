@@ -140,9 +140,8 @@ class Player(Entity):
             return None
 
         if isinstance(item, weapon_cls):
-            # 武器 slot 是 "melee"/"ranged"，但装备槽的键是 "weapon"/"ranged"，
-            # 需要映射：melee 武器挂在 equipment["weapon"] 上
-            equip_slot = "weapon" if item.slot == "melee" else item.slot
+            # 装备槽的键是 weapon/ranged，武器分类是 melee/ranged，走 equip_slot 映射
+            equip_slot = item.equip_slot
             candidates = [
                 self.equipment.get(equip_slot),
                 *(i for i in self.inventory if isinstance(i, weapon_cls) and i.slot == item.slot),
@@ -184,9 +183,14 @@ class Player(Entity):
         return ok, message
 
     def equip(self, item: Item) -> None:
-        """装到对应装备槽。武器按 ``slot`` 分流到近战或远程槽。"""
+        """装到对应装备槽。
+
+        武器的 ``slot`` 是分类（melee/ranged），装备槽的键是 weapon/ranged，
+        所以必须走 ``item.equip_slot`` 做映射——直接拿 slot 当键会让近战武器
+        写进一个凭空出现的 ``equipment["melee"]``，面板和战斗都看不到它。
+        """
         if item.kind == "weapon":
-            slot = getattr(item, "slot", "melee")
+            slot = getattr(item, "equip_slot", "weapon")
         elif item.kind == "armor":
             slot = "armor"
         else:

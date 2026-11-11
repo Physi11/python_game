@@ -71,6 +71,25 @@ C_ITEM_WEAPON = "#c9d4e6"
 C_ITEM_ARMOR = "#9fb3c8"
 C_ITEM_SCROLL = "#c79bf0"
 
+# 精英怪：金色描边，与普通怪一眼可分
+ELITE = "#ffd166"
+# 治疗怪：青绿色，和红色系攻击怪区分开——它是要优先点掉的目标
+HEALER = "#7ddc9a"
+
+# 趣味房间：底色刻意低饱和，避免抢走角色的视觉重心
+FEATURE_FILL = {
+    "heal": "#15302f",
+    "vault": "#302a17",
+    "trap": "#33191c",
+    "shrine": "#241d33",
+}
+FEATURE_COLOR = {
+    "heal": "#5ad1c4",
+    "vault": "#e8c45a",
+    "trap": "#e5484d",
+    "shrine": "#b98cff",
+}
+
 # 日志分类配色
 LOG_COLORS = {
     "system": TEXT_DIM,
@@ -161,6 +180,33 @@ class Theme:
             "Accent.TButton", background=ACCENT, foreground="#0c1116", font=self.bold
         )
         style.map("Accent.TButton", background=[("active", "#78e3d6")])
+
+        # 下拉框：clam 默认是浅色的，放到深色面板上像一块补丁，这里统一压暗。
+        # readonly 状态的背景由 fieldbackground 控制，必须单独 map 才生效。
+        style.configure(
+            "TCombobox",
+            fieldbackground=PANEL_ALT,
+            background=PANEL_ALT,
+            foreground=TEXT,
+            arrowcolor=TEXT,
+            borderwidth=1,
+            bordercolor=BORDER,
+            lightcolor=BORDER,
+            darkcolor=BORDER,
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", PANEL_ALT), ("disabled", PANEL)],
+            foreground=[("readonly", TEXT), ("disabled", TEXT_DIM)],
+            selectbackground=[("readonly", PANEL_ALT)],
+            selectforeground=[("readonly", TEXT)],
+            background=[("readonly", PANEL_ALT), ("active", BORDER)],
+        )
+        # 下拉弹出的列表不在 ttk 样式体系里，只能用 option 数据库
+        root.option_add("*TCombobox*Listbox.background", PANEL_ALT)
+        root.option_add("*TCombobox*Listbox.foreground", TEXT)
+        root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        root.option_add("*TCombobox*Listbox.selectForeground", "#0c1116")
 
     @staticmethod
     def dim(color: str, factor: float = DIM_FACTOR) -> str:

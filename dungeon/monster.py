@@ -41,10 +41,16 @@ class MonsterProto:
     weight: float = 1.0  # 加权抽取权重
     is_boss: bool = False
     # ---- 攻击形态 ----
-    pattern: str = "melee"   # melee / line / arc / ranged
-    reach: int = 1           # 最大射程（格）
+    pattern: str = "melee"   # melee / line / arc / ranged / support
+    reach: int = 1           # 最大射程（格）；support 表示治疗半径
     min_reach: int = 1       # 最小射程，远程兵种用来避免贴脸射击
     charge: int = 1          # 起手到命中的回合数
+    heal_power: int = 0      # support 兵种每次治疗量
+
+    @property
+    def is_support(self) -> bool:
+        """是否是治疗型兵种（不攻击，只给同伴回血）。"""
+        return self.pattern == "support"
 
 
 # ------------------------------------------------------------------ 物种表
@@ -63,6 +69,12 @@ MONSTER_TABLE: list[MonsterProto] = [
     MonsterProto("bat", "吸血蝙蝠", "b", hp=9, atk=6, defense=0, exp=12, gold=4,
                  ai="chase", aggro=8, min_floor=2, weight=1.4,
                  pattern="melee", reach=2, charge=2),
+    # 治疗怪：几乎不输出，专职给同伴回血，逼玩家改变击杀优先级。
+    # 攻击力刻意压到 2，保证它在"伤害—蓄力"单调表里仍落在最低档。
+    MonsterProto("shaman", "萨满巫医", "h", hp=14, atk=2, defense=1, exp=18, gold=9,
+                 ai="support", aggro=6, min_floor=2, weight=1.2,
+                 pattern="support", reach=4, charge=2,
+                 heal_power=config.HEALER_HEAL_POWER),
     # 弓兵：远程点名，射程远但伤害低，蓄力短
     MonsterProto("archer", "弓兵", "A", hp=12, atk=6, defense=1, exp=20, gold=9,
                  ai="chase", aggro=7, min_floor=2, weight=1.8,
@@ -90,19 +102,51 @@ MONSTER_BY_KIND: dict[str, MonsterProto] = {proto.kind: proto for proto in MONST
 
 
 class Monster(Entity):
-    """地图上的一只怪物。"""
+    """地图上的一只怪物。
 
-    def __init__(self, proto: MonsterProto, x: int, y: int, floor: int = 1) -> None:
+    ``elite=True`` 表示精英个体：同一兵种的强化版（更硬、更疼、奖励更高），
+    但**形态与蓄力回合不变**。这条约束很重要——精英是数值修饰，不是新物种，
+    若连蓄力也一起拉长，玩家会看到"精英史莱姆蓄力 4 回合"这种不合直觉的东西，
+    也会破坏 ``test_charge_is_non_decreasing_with_damage`` 想守住的兵种设计规则。
+    """
+
+    def __init__(
+        self,
+        proto: MonsterProto,
+        x: int,
+        y: int,
+        floor: int = 1,
+        elite: bool = False,
+        hp_mult: float = 1.0,
+    ) -> None:
         # BOSS 使用固定数值，不随层数缩放：它就是第 10 层的最终考验
         if proto.is_boss:
             hp, atk = proto.hp, proto.atk
         else:
             hp = max(1, round(proto.hp * (1 + config.MONSTER_HP_SCALE * (floor - 1))))
             atk = max(1, round(proto.atk * (1 + config.MONSTER_ATK_SCALE * (floor - 1))))
-        super().__init__(proto.name, proto.glyph, x, y, hp, atk, proto.defense)
+        # 难度预设的生命倍率：只加强对手，不动玩家
+        hp = max(1, round(hp * max(0.1, hp_mult)))
+        self.elite: bool = bool(elite) and not proto.is_boss
+        if self.elite:
+            hp = max(1, round(hp * config.ELITE_HP_MULT))
+            atk = max(1, round(atk * config.ELITE_ATK_MULT))
+        name = f"{config.ELITE_NAME_PREFIX}{proto.name}" if self.elite else proto.name
+        super().__init__(
+            name,
+            proto.glyph,
+            x,
+            y,
+            hp,
+            atk,
+            proto.defense + (config.ELITE_DEF_BONUS if self.elite else 0),
+        )
+        self.base_name: str = proto.name
         self.kind: str = proto.kind
-        self.exp_reward: int = proto.exp
-        self.gold_reward: int = proto.gold
+        exp_mult = config.ELITE_EXP_MULT if self.elite else 1.0
+        gold_mult = config.ELITE_GOLD_MULT if self.elite else 1.0
+        self.exp_reward: int = round(proto.exp * exp_mult)
+        self.gold_reward: int = round(proto.gold * gold_mult)
         self.ai: str = proto.ai
         self.aggro: int = proto.aggro
         self.is_boss: bool = proto.is_boss
@@ -113,6 +157,9 @@ class Monster(Entity):
         self.reach: int = proto.reach
         self.min_reach: int = proto.min_reach
         self.charge_turns: int = max(1, proto.charge)
+        # 治疗量随层数小幅成长，但精英不自带治疗加成（它不是治疗职业）
+        scale = 1 + config.HEALER_HEAL_SCALE * (floor - 1)
+        self.heal_power: int = max(0, round(proto.heal_power * scale))
 
         # ---- 蓄力运行时状态 ----
         self.charge_left: int = 0                    # 还要几回合出手，0 表示没在蓄力
@@ -120,11 +167,18 @@ class Monster(Entity):
 
     # ------------------------------------------------------------ 查询
     @property
+    def is_support(self) -> bool:
+        """是否是治疗型单位（不攻击，只给同伴回血）。"""
+        return self.pattern == "support"
+
+    @property
     def is_charging(self) -> bool:
         return self.charge_left > 0
 
     @property
     def range_text(self) -> str:
+        if self.pattern == "support":
+            return f"治疗半径 {self.reach} 格"
         if self.pattern == "ranged":
             return f"射程 {self.min_reach}~{self.reach} 格"
         if self.pattern == "line":
@@ -170,6 +224,27 @@ class Monster(Entity):
         ]
         return rng.choice(options) if options else None
 
+    # ------------------------------------------------------------ 治疗（support）
+    def heal_target(self, candidates: list["Monster"]) -> tuple["Monster", int] | None:
+        """挑一个治疗目标，返回 (目标, 治疗量)；没有可治疗对象时返回 None。
+
+        优先级：**血量比例最低**的同伴（不含自己）。自己永远排最后且只回一半，
+        否则治疗怪会变成"打不死的自愈机器"，把战斗拖成僵局。
+        """
+        if self.heal_power <= 0:
+            return None
+        wounded = [
+            m
+            for m in candidates
+            if m is not self and m.alive and m.hp < m.max_hp
+        ]
+        if wounded:
+            target = min(wounded, key=lambda m: m.hp / max(1, m.max_hp))
+            return target, self.heal_power
+        if self.hp < self.max_hp:
+            return self, max(1, round(self.heal_power * config.HEALER_SELF_HEAL_RATIO))
+        return None
+
     # ------------------------------------------------------------ 序列化
     def to_dict(self) -> dict[str, Any]:
         data = self._base_dict()
@@ -177,6 +252,7 @@ class Monster(Entity):
             {
                 "kind": self.kind,
                 "floor": self.floor,
+                "elite": self.elite,
                 "charge_left": self.charge_left,
                 "telegraph": [list(cell) for cell in sorted(self.telegraph)],
             }
@@ -193,6 +269,7 @@ class Monster(Entity):
             int(data["x"]),
             int(data["y"]),
             int(data.get("floor", 1)),
+            elite=bool(data.get("elite", False)),
         )
         monster.hp = int(data["hp"])
         monster.max_hp = int(data.get("max_hp", monster.max_hp))

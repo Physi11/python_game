@@ -26,6 +26,8 @@ from .icon_set import IconSet
 from .icons import DEFAULT_BASE_DIR, IconManifest, IconManifestError, load_manifest
 from .map_view import MapView
 from .panels import LogPanel, StatusPanel
+from .settings import Settings, load_settings, save_settings
+from .start_screen import StartOverlay
 
 # 键盘 → 方向。keysym 统一转小写后比较
 DIR_KEYS: dict[str, tuple[int, int]] = {
@@ -50,20 +52,22 @@ DEFAULT_HINT = "右键/F 瞄准　左键 移动或确认　Tab 换武器　空�
 class App(tk.Tk):
     """地下城探险主程序窗口。"""
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int | None = None, show_start: bool = True) -> None:
         # 必须在创建 Tk 之前声明 DPI 感知，否则高分屏上文字会被系统拉伸变糊
         th.enable_dpi_awareness()
         super().__init__()
         self.title(config.APP_TITLE)
         self.configure(bg=th.BG)
-        self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT}+80+40")
+        self.settings: Settings = load_settings()
+        self._windowed_geometry = f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT}+80+40"
+        self.geometry(self._windowed_geometry)
         self.resizable(False, False)
 
         self.theme = th.Theme(self)
         self.theme.apply(self)
 
         self.save_manager = SaveManager()
-        self.state: GameState = GameState.new_game(seed=seed)
+        self.state: GameState = self._make_state(seed=seed)
         self.icons = self._load_icon_set()
         self._record_saved = False
         self._status_after: str | None = None
@@ -71,18 +75,34 @@ class App(tk.Tk):
         # 瞄准模式：None 表示普通模式，"weapon"/"ranged" 表示正在用该槽位的武器瞄准
         self.aim_slot: str | None = None
         self._aim_cell: tuple[int, int] | None = None
+        self._start_overlay: StartOverlay | None = None
 
         self._build_ui()
         self._build_menu()
         self._bind_keys()
 
+        # 全屏是"启动即生效"的设置：必须在界面装配完之后应用一次
+        self._apply_settings(initial=True)
         self._attach_state(self.state, fresh=True)
         self.set_status("欢迎来到地下城。按 ? 查看操作说明。")
+        if show_start:
+            self.show_start_screen()
+
+    def _make_state(self, seed: int | None = None) -> GameState:
+        """按当前设置创建一局新游戏（难度预设与自适应开关都在这里生效）。"""
+        return GameState.new_game(
+            seed=seed,
+            adaptive_difficulty=self.settings.adaptive_difficulty,
+            difficulty=self.settings.difficulty,
+        )
 
     # ================================================================ 界面装配
     def _build_ui(self) -> None:
-        container = tk.Frame(self, bg=th.BG)
-        container.pack(fill="both", expand=True, padx=10, pady=(6, 8))
+        # 用 place 居中而不是 pack 铺满：这样窗口进入全屏、或用户拉伸窗口时，
+        # 固定尺寸的地图与面板会保持原有比例居中显示，不会被拉变形。
+        container = tk.Frame(self, bg=th.BG, padx=10, pady=8)
+        container.place(relx=0.5, rely=0.5, anchor="center")
+        self._game_container = container
 
         top = tk.Frame(container, bg=th.BG)
         top.pack(fill="both", expand=False)
@@ -128,10 +148,12 @@ class App(tk.Tk):
     def _build_menu(self) -> None:
         menubar = tk.Menu(self, tearoff=0, bg=th.PANEL, fg=th.TEXT, activebackground=th.BORDER)
         self.config(menu=menubar)
+        self._menubar = menubar
 
         game_menu = tk.Menu(menubar, tearoff=0)
         game_menu.add_command(label="新游戏", accelerator="N", command=self.new_game)
         game_menu.add_command(label="新游戏（指定种子）", command=self.new_game_with_seed)
+        game_menu.add_command(label="返回开始界面", command=self.show_start_screen)
         game_menu.add_separator()
         game_menu.add_command(label="保存到 1 号槽", accelerator="F5", command=lambda: self.save_game(1))
         game_menu.add_command(label="读取 1 号槽", accelerator="F9", command=lambda: self.load_game(1))
@@ -144,6 +166,9 @@ class App(tk.Tk):
         view_menu.add_command(label="背包", accelerator="I", command=self.show_inventory)
         view_menu.add_command(label="历史战绩", command=self.show_leaderboard)
         view_menu.add_command(label="统计图表", accelerator="M", command=self.show_charts)
+        view_menu.add_separator()
+        view_menu.add_command(label="设置…", command=self.show_settings)
+        view_menu.add_command(label="切换全屏", accelerator="F11", command=self.toggle_fullscreen)
         view_menu.add_separator()
         view_menu.add_command(label="重载图标资源", accelerator="F12", command=self.reload_icons)
         view_menu.add_command(label="清空历史战绩", command=self.clear_records)
@@ -160,6 +185,7 @@ class App(tk.Tk):
         self.bind("<Control-s>", lambda _e: self.save_game(1))
         self.bind("<F9>", lambda _e: self.load_game(1))
         self.bind("<Control-o>", lambda _e: self.load_game(1))
+        self.bind("<F11>", lambda _e: self.toggle_fullscreen())
         self.bind("<F12>", lambda _e: self.reload_icons())
 
     # ================================================================ 图标资源
@@ -186,6 +212,105 @@ class App(tk.Tk):
         self.map_view.refresh(force=True)
         del old
         self.set_status(f"图标已重载：{self.map_view.icon_set.summary()}")
+
+    # ================================================================ 开始界面
+    def show_start_screen(self) -> None:
+        """盖上开始界面。
+
+        菜单栏在开始界面期间隐藏——否则玩家可以一边看开始菜单一边点"新游戏"，
+        状态会绕开覆盖层的按钮流。关闭覆盖层时再装回去。
+        """
+        if self._start_overlay is not None:
+            self._start_overlay.lift()
+            return
+        self.config(menu="")
+        overlay = StartOverlay(
+            self,
+            self.theme,
+            on_start=lambda: self.new_game(confirm=False),
+            on_load=self._start_from_save,
+            on_settings=self.show_settings,
+            on_quit=self.on_quit,
+        )
+        overlay.place(relwidth=1, relheight=1)
+        overlay.lift()
+        self._start_overlay = overlay
+        overlay.focus_set()
+
+    def hide_start_screen(self) -> None:
+        """移除开始界面并把菜单栏装回去。"""
+        if self._start_overlay is not None:
+            self._start_overlay.destroy()
+            self._start_overlay = None
+        try:
+            self.config(menu=getattr(self, "_menubar", None) or "")
+        except tk.TclError:          # pragma: no cover - 窗口正在销毁
+            pass
+        self._focus_map()
+
+    def _start_from_save(self) -> None:
+        """从开始界面读档：直接找第一个有内容的槽位，不需要"覆盖当前进度"确认。"""
+        slot = None
+        for meta in self.save_manager.list_meta():
+            if meta.get("exists"):
+                slot = int(meta["slot"])
+                break
+        if slot is None:
+            self.set_status("还没有任何存档，先开一局新游戏吧", "warn")
+            return
+        try:
+            state = self.save_manager.load(slot)
+        except SaveError as exc:
+            messagebox.showerror("读档失败", str(exc), parent=self)
+            return
+        self.hide_start_screen()
+        self._attach_state(state, fresh=True)
+        self.set_status(f"已读取 {slot} 号存档：第 {state.floor} 层")
+
+    # ================================================================ 设置
+    def show_settings(self) -> None:
+        dialogs.show_settings(
+            self, self.theme, self.settings, on_change=self._on_setting_change
+        )
+
+    def _on_setting_change(self, key: str, value: Any) -> None:
+        """设置面板改动后的回调：立即生效 + 落盘。
+
+        ``fullscreen`` 立刻作用于窗口；难度类设置作用于**下一层**——
+        当前这一层已经生成好了，临时改难度不会把地图重roll，避免玩家
+        在层中途"改设置换地图"。
+        """
+        setattr(self.settings, key, value)
+        save_settings(self.settings)
+        if key == "fullscreen":
+            self._apply_fullscreen()
+        elif key in ("adaptive_difficulty", "difficulty"):
+            self.state.adaptive_difficulty = self.settings.adaptive_difficulty
+            self.state.difficulty = self.settings.difficulty
+            self.set_status("难度设置已更新，从下一层开始生效")
+
+    def _apply_settings(self, initial: bool = False) -> None:
+        """启动时把持久化的设置应用到窗口上。"""
+        if initial:
+            self.geometry(self._windowed_geometry)
+        self._apply_fullscreen()
+
+    def _apply_fullscreen(self) -> None:
+        want = bool(self.settings.fullscreen)
+        try:
+            self.attributes("-fullscreen", want)
+        except tk.TclError:          # pragma: no cover - 极少数平台不支持
+            return
+        if not want:
+            # 退出全屏时把窗口尺寸还原，否则会留下一个和屏幕一样大的窗口
+            self.geometry(self._windowed_geometry)
+        self.set_status("已进入全屏（F11 退出）" if want else "已退出全屏")
+
+    def toggle_fullscreen(self) -> None:
+        """F11 / 菜单：切换全屏并记住这个选择。"""
+        self.settings.fullscreen = not self.settings.fullscreen
+        save_settings(self.settings)
+        self._apply_fullscreen()
 
     # ================================================================ 状态切换
     def _attach_state(self, state: GameState, fresh: bool = False) -> None:
@@ -283,6 +408,11 @@ class App(tk.Tk):
     # ================================================================ 输入
     def _on_key(self, event: tk.Event) -> None:
         keysym = (event.keysym or "").lower()
+
+        # 开始界面盖在上面时，游戏按键一律不响应：否则玩家在菜单里按方向键，
+        # 后面那局游戏会跟着偷偷走几步。F11 走独立绑定，不受这条守卫影响。
+        if self._start_overlay is not None:
+            return
 
         # 输入框（种子输入等）需要独占键盘；日志区是只读的，按键应当直接作用于游戏
         if isinstance(event.widget, TEXT_WIDGETS):
@@ -522,15 +652,29 @@ class App(tk.Tk):
             return
         monster = state.monster_at(x, y)
         if monster is not None and (x, y) in state.dungeon.visible:
+            tag = "【精英】" if monster.elite else ""
+            if monster.is_support:
+                extra = f"　每回合治疗同伴 {monster.heal_power} 点（{monster.range_text}）"
+            else:
+                extra = f"　蓄力 {monster.charge_turns} 回合　{monster.range_text}"
             self.set_status(
-                f"{monster.name}　HP {monster.hp}/{monster.max_hp}　"
-                f"攻击 {monster.atk}　防御 {monster.defense}　"
-                f"击杀奖励 {monster.exp_reward} 经验"
+                f"{tag}{monster.name}　HP {monster.hp}/{monster.max_hp}　"
+                f"攻击 {monster.atk}　防御 {monster.defense}{extra}"
             )
             return
         item = state.item_at(x, y)
         if item is not None and (x, y) in state.dungeon.visible:
             self.set_status(item.describe())
+            return
+        feature = state.dungeon.feature_at(x, y)
+        if feature:
+            from dungeon.dungeon import FEATURE_LABELS
+
+            spent = (x, y) in state.used_features
+            name = FEATURE_LABELS.get(feature, feature)
+            self.set_status(
+                f"{name}（{'已使用' if spent else '踩上去触发'}）"
+            )
             return
         tile = state.dungeon.tile_at(x, y)
         names = {"WALL": "石墙", "FLOOR": "地面", "DOOR": "门", "STAIRS": "向下的楼梯"}
@@ -553,10 +697,11 @@ class App(tk.Tk):
         self.status_label.config(text=DEFAULT_HINT.split("　")[0], fg=th.TEXT_DIM)
 
     # ================================================================ 菜单命令
-    def new_game(self, seed: int | None = None) -> None:
-        if not self._confirm_discard("开始新游戏会丢失当前进度，确定吗？"):
+    def new_game(self, seed: int | None = None, confirm: bool = True) -> None:
+        if confirm and not self._confirm_discard("开始新游戏会丢失当前进度，确定吗？"):
             return
-        state = GameState.new_game(seed=seed)
+        self.hide_start_screen()
+        state = self._make_state(seed=seed)
         self._attach_state(state, fresh=True)
         self.set_status(f"新的一局开始了（种子 {state.rng.seed}）")
 
@@ -645,7 +790,7 @@ class App(tk.Tk):
         self.destroy()
 
 
-def run(seed: int | None = None) -> None:
-    """启动应用。"""
-    app = App(seed=seed)
+def run(seed: int | None = None, show_start: bool = True) -> None:
+    """启动应用。``show_start=False`` 用于截图与自动化测试直接进入游戏。"""
+    app = App(seed=seed, show_start=show_start)
     app.mainloop()

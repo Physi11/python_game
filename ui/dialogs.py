@@ -18,7 +18,7 @@ from dungeon.stats import StatsAnalyzer
 from . import theme as th
 
 HELP_ROWS = [
-    ("↑ ↓ ← → / W A S D", "移动一格（每回合只能做一个行动：移动 / 攻击 / 等待）"),
+    ("↑↓←→ WASD", "移动一格（每回合只能做一个行动：移动 / 攻击 / 等待）"),
     ("空格", "原地等待一回合"),
     ("F 或 鼠标右键", "进入 / 退出瞄准模式"),
     ("鼠标左键", "瞄准中：确认攻击；平时：点击相邻格移动、点脚下拾取或下楼"),
@@ -32,6 +32,7 @@ HELP_ROWS = [
     ("F9 / Ctrl+O", "读取 1 号存档槽"),
     ("N", "开始新的一局"),
     ("M", "打开 / 关闭统计图表"),
+    ("F11", "切换全屏（设置里也能开关）"),
     ("F12", "重载图标资源"),
     ("?", "显示本帮助"),
 ]
@@ -117,38 +118,49 @@ def _bind_focus_return(win: tk.Toplevel, parent: tk.Misc) -> None:
 
 # ====================================================================== 帮助
 def show_help(parent: tk.Misc, theme: th.Theme) -> tk.Toplevel:
-    win = make_window(parent, theme, "操作说明", 780, 760)
+    """操作说明：**双列**排布按键表。
+
+    单列放不下 17 条快捷键 + 图例 + 提示，早先的版本会把底部内容挤出窗口。
+    改成左右两列后行高更紧凑，一屏能看全，也不用滚轮。
+    """
+    win = make_window(parent, theme, "操作说明", 1000, 900)
 
     header = tk.Frame(win, bg=th.BG)
-    header.pack(fill="x", padx=24, pady=(20, 6))
+    header.pack(fill="x", padx=24, pady=(18, 4))
     tk.Label(
         header, text="操 作 说 明", bg=th.BG, fg=th.ACCENT, font=theme.title
     ).pack(anchor="w")
     tk.Label(
         header,
-        text="目标是深入地下城第 10 层，击败深渊领主。撞向怪物即攻击。",
+        text="目标是深入地下城第 10 层，击败深渊领主。攻击要先装备武器，再用鼠标选定目标区域。",
         bg=th.BG,
         fg=th.TEXT_DIM,
         font=theme.small,
     ).pack(anchor="w", pady=(4, 0))
 
     body = tk.Frame(win, bg=th.PANEL)
-    body.pack(fill="both", expand=True, padx=24, pady=10)
+    body.pack(fill="both", expand=True, padx=24, pady=8)
 
-    for index, (keys, desc) in enumerate(HELP_ROWS):
-        bg = th.PANEL if index % 2 == 0 else th.PANEL_ALT
-        row = tk.Frame(body, bg=bg)
-        row.pack(fill="x")
-        tk.Label(
-            row, text=keys, bg=bg, fg=th.GOLD, font=theme.bold, width=16, anchor="w"
-        ).pack(side="left", padx=(12, 4), pady=7)
-        tk.Label(
-            row, text=desc, bg=bg, fg=th.TEXT, font=theme.small, anchor="w",
-            justify="left", wraplength=520,
-        ).pack(side="left", fill="x", expand=True, pady=7)
+    half = (len(HELP_ROWS) + 1) // 2
+    for col, rows in enumerate((HELP_ROWS[:half], HELP_ROWS[half:])):
+        column = tk.Frame(body, bg=th.PANEL)
+        column.pack(
+            side="left", fill="both", expand=True, padx=(0, 8) if col == 0 else (8, 0)
+        )
+        for index, (keys, desc) in enumerate(rows):
+            bg = th.PANEL if index % 2 == 0 else th.PANEL_ALT
+            row = tk.Frame(column, bg=bg)
+            row.pack(fill="x")
+            tk.Label(
+                row, text=keys, bg=bg, fg=th.GOLD, font=theme.bold, width=12, anchor="w"
+            ).pack(side="left", padx=(10, 4), pady=4)
+            tk.Label(
+                row, text=desc, bg=bg, fg=th.TEXT, font=theme.small, anchor="w",
+                justify="left", wraplength=290,
+            ).pack(side="left", fill="x", expand=True, pady=4)
 
     footer = tk.Frame(win, bg=th.BG)
-    footer.pack(fill="x", padx=24, pady=(4, 18))
+    footer.pack(fill="x", padx=24, pady=(2, 16))
     tk.Label(
         footer,
         text="战场色块",
@@ -158,20 +170,20 @@ def show_help(parent: tk.Misc, theme: th.Theme) -> tk.Toplevel:
         row = tk.Frame(footer, bg=th.BG)
         row.pack(fill="x")
         tk.Label(
-            row, text=keys, bg=th.BG, fg=th.GOLD, font=theme.small, width=12, anchor="w"
+            row, text=keys, bg=th.BG, fg=th.GOLD, font=theme.small, width=14, anchor="w"
         ).pack(side="left")
         tk.Label(
             row, text=desc, bg=th.BG, fg=th.TEXT_DIM, font=theme.small, anchor="w"
         ).pack(side="left")
     tk.Label(
         footer,
-        text="提示：先看彩色区域决定站哪里，再决定这一回合是走位还是出手。重武器伤害高但要蓄力，"
-             "轻武器可以立刻打断敌人。捡到同名装备会自动合成升级（最高 +3），"
-             "所以重复掉落也不是废品。",
+        text="金色描边是精英（更强、奖励更多）；青绿描边的萨满会给同伴回血——先点它。\n"
+             "地图上的 ≈ $ × † 分别是治疗泉、宝库、陷阱房与力量祭坛，踩上去触发。\n"
+             "捡到同名装备会自动合成升级（最高 +3），重复掉落也不是废品。",
         bg=th.BG,
         fg=th.TEXT_DIM,
         font=theme.small,
-        wraplength=700,
+        wraplength=900,
         justify="left",
     ).pack(anchor="w", pady=(8, 0))
     ttk.Button(footer, text="知道了", style="Accent.TButton", command=win.destroy).pack(
@@ -532,5 +544,107 @@ def _message(parent: tk.Misc, theme: th.Theme, title: str, text: str) -> tk.Topl
         wraplength=400, justify="center",
     ).pack(padx=20)
     ttk.Button(win, text="知道了", style="Accent.TButton", command=win.destroy).pack(pady=16)
+    win.focus_set()
+    return win
+
+
+# ------------------------------------------------------------------ 设置
+def show_settings(
+    parent: tk.Misc,
+    theme: th.Theme,
+    settings: Any,
+    on_change: Callable[[str, Any], None] | None = None,
+) -> tk.Toplevel:
+    """设置面板：**完全由 schema 生成**，界面代码里没有一项一项写死。
+
+    ``ui/settings.py`` 的 ``SETTING_SPECS`` 每多一条，这个窗口就多一行；
+    新增设置项不需要改这里。这也是"预留扩展通道"的落地方式。
+    """
+    from .settings import SETTING_SPECS, reset_settings, save_settings
+
+    win = make_window(parent, theme, "设置", 640, 520)
+
+    header = tk.Frame(win, bg=th.BG)
+    header.pack(fill="x", padx=24, pady=(18, 4))
+    tk.Label(header, text="设　　置", bg=th.BG, fg=th.ACCENT, font=theme.title).pack(anchor="w")
+    tk.Label(
+        header,
+        text="修改立即生效并写入 data/settings.json",
+        bg=th.BG, fg=th.TEXT_DIM, font=theme.small,
+    ).pack(anchor="w", pady=(2, 0))
+
+    body = tk.Frame(win, bg=th.PANEL)
+    body.pack(fill="both", expand=True, padx=24, pady=12)
+
+    def commit(key: str, value: Any) -> None:
+        settings.apply(**{key: value})
+        save_settings(settings)
+        if on_change is not None:
+            on_change(key, value)
+
+    for index, spec in enumerate(SETTING_SPECS):
+        bg = th.PANEL if index % 2 == 0 else th.PANEL_ALT
+        row = tk.Frame(body, bg=bg)
+        row.pack(fill="x")
+
+        left = tk.Frame(row, bg=bg)
+        left.pack(side="left", fill="x", expand=True, padx=(14, 8), pady=9)
+        tk.Label(left, text=spec.label, bg=bg, fg=th.TEXT, font=theme.bold).pack(anchor="w")
+        if spec.help:
+            tk.Label(
+                left, text=spec.help, bg=bg, fg=th.TEXT_DIM, font=theme.tiny,
+                wraplength=380, justify="left",
+            ).pack(anchor="w")
+
+        if spec.kind == "bool":
+            var = tk.BooleanVar(value=bool(getattr(settings, spec.key, spec.default)))
+            tk.Checkbutton(
+                row, variable=var, bg=bg, activebackground=bg,
+                selectcolor=th.PANEL_ALT, fg=th.ACCENT, activeforeground=th.ACCENT,
+                highlightthickness=0, bd=0, font=theme.base,
+                command=lambda k=spec.key, v=var: commit(k, bool(v.get())),
+            ).pack(side="right", padx=(0, 14))
+        elif spec.kind == "choice":
+            current = getattr(settings, spec.key, spec.default)
+            labels = {value: label for value, label in spec.choices}
+            var = tk.StringVar(value=labels.get(current, current))
+            box = ttk.Combobox(
+                row, textvariable=var, state="readonly", width=12,
+                values=[label for _, label in spec.choices],
+            )
+            box.pack(side="right", padx=(0, 14))
+            reverse = {label: value for value, label in spec.choices}
+
+            def on_pick(_event, k=spec.key, v=var, rev=reverse) -> None:
+                commit(k, rev.get(v.get(), spec.default))
+
+            box.bind("<<ComboboxSelected>>", on_pick)
+
+    footer = tk.Frame(win, bg=th.BG)
+    footer.pack(fill="x", padx=24, pady=(0, 16))
+    # 提示与按钮分两行：挤在一行时"关闭"按钮会被提示文字顶出窗口
+    tk.Label(
+        footer,
+        text="新增设置项：在 ui/settings.py 的 SETTING_SPECS 里追加一条即可",
+        bg=th.BG, fg="#5a6678", font=theme.tiny, anchor="w",
+    ).pack(fill="x")
+
+    actions = tk.Frame(footer, bg=th.BG)
+    actions.pack(fill="x", pady=(8, 0))
+
+    def do_reset() -> None:
+        fresh = reset_settings()
+        for spec in SETTING_SPECS:
+            if on_change is not None:
+                on_change(spec.key, getattr(fresh, spec.key, spec.default))
+        win.destroy()
+        show_settings(parent, theme, fresh, on_change)
+
+    ttk.Button(actions, text="恢复默认", command=do_reset).pack(side="right", padx=(8, 0))
+    ttk.Button(actions, text="关闭", style="Accent.TButton", command=win.destroy).pack(
+        side="right"
+    )
+
+    win.bind("<Escape>", lambda _e: win.destroy())
     win.focus_set()
     return win

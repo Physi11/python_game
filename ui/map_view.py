@@ -17,7 +17,7 @@ import tkinter as tk
 from typing import Any, Callable
 
 from dungeon import config
-from dungeon.dungeon import Dungeon, Tile
+from dungeon.dungeon import FEATURE_GLYPHS, Dungeon, Tile
 
 from . import theme as th
 from .icons import item_candidates, monster_candidates
@@ -146,7 +146,11 @@ class MapView(tk.Canvas):
                     continue
                 self._sig[(x, y)] = look
                 fill, glyph, color, outline, candidates = look
-                self.itemconfig(self._rect[(x, y)], fill=fill, outline=outline)
+                # 精英与治疗怪用 2px 描边突出（普通格 1px，描边为空时不画）
+                width = 2 if outline in (th.ELITE, th.HEALER) else 1
+                self.itemconfig(
+                    self._rect[(x, y)], fill=fill, outline=outline, width=width
+                )
                 text_id = self._text[(x, y)]
                 image_id = self._img.get((x, y))
 
@@ -442,9 +446,24 @@ class MapView(tk.Canvas):
         else:
             fill = th.FLOOR if (x + y) % 2 == 0 else th.FLOOR_ALT
 
+        # 趣味房间：换底色 + 特殊字符。放在实体绘制之前，玩家/怪物/道具会覆盖它
+        feature = dungeon.feature_at(x, y)
+        feature_spent = (x, y) in getattr(state, "used_features", ())
+        if feature and tile is not Tile.WALL:
+            fill = th.FEATURE_FILL.get(feature, fill)
+
         glyph, color = "", th.TEXT
         candidates: tuple[str, ...] = ()
         if visible:
+            if feature and tile not in (Tile.STAIRS, Tile.DOOR):
+                # 已经触发过的房间画成暗色，玩家一眼就知道"这里没东西了"
+                glyph = FEATURE_GLYPHS.get(feature, "?")
+                color = (
+                    th.Theme.dim(th.FEATURE_COLOR.get(feature, th.TEXT))
+                    if feature_spent
+                    else th.FEATURE_COLOR.get(feature, th.TEXT)
+                )
+                candidates = (f"feature.{feature}",)
             if tile is Tile.STAIRS:
                 glyph, color = "↓", th.STAIRS
                 candidates = ("stair",)
@@ -468,6 +487,14 @@ class MapView(tk.Canvas):
                 glyph = monster.glyph
                 color = th.C_MONSTER if monster.hp_ratio > 0.6 else th.C_MONSTER_HURT
                 candidates = monster_candidates(monster.kind)
+                if monster.elite:
+                    # 精英：金色描边 + 金色字符，普通怪是红色系，不会混淆
+                    outline = th.ELITE
+                    color = th.ELITE
+                elif monster.is_support:
+                    # 治疗怪：青绿描边 + 青绿字符，提示"这是要优先点掉的目标"
+                    outline = th.HEALER
+                    color = th.HEALER
             else:
                 item = state.item_at(x, y)
                 if item is not None:

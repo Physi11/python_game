@@ -64,15 +64,16 @@ class StatusPanel(ttk.Frame):
             BAR_W / 2, 14, text="", fill=th.TEXT, font=self.theme.tiny
         )
 
-        # 经验条
+        # 经验条。高度要容得下里面的文字：早先条高只有 6px、字号 8pt，
+        # 文字会上下溢出压到条外，看起来像两条叠在一起。
         self.exp_canvas = tk.Canvas(
-            self, width=BAR_W, height=12, bg=th.PANEL, highlightthickness=0
+            self, width=BAR_W, height=18, bg=th.PANEL, highlightthickness=0
         )
-        self.exp_canvas.pack(pady=(4, 0), **pad)
-        self.exp_canvas.create_rectangle(0, 3, BAR_W, 9, fill=th.PANEL_ALT, outline="")
-        self.exp_bar = self.exp_canvas.create_rectangle(0, 3, 0, 9, fill=th.EXP_BLUE, outline="")
+        self.exp_canvas.pack(pady=(2, 0), **pad)
+        self.exp_canvas.create_rectangle(0, 5, BAR_W, 15, fill=th.PANEL_ALT, outline="")
+        self.exp_bar = self.exp_canvas.create_rectangle(0, 5, 0, 15, fill=th.EXP_BLUE, outline="")
         self.exp_text = self.exp_canvas.create_text(
-            BAR_W / 2, 6, text="", fill=th.TEXT_DIM, font=self.theme.tiny
+            BAR_W / 2, 10, text="", fill=th.TEXT, font=self.theme.tiny
         )
 
         # 数值网格（2 行 × 2 列，避免在 300 像素宽的面板里挤成一行）
@@ -167,7 +168,7 @@ class StatusPanel(ttk.Frame):
 
         exp_need = max(1, player.exp_to_next)
         exp_ratio = min(1.0, player.exp / exp_need)
-        self.exp_canvas.coords(self.exp_bar, 0, 3, BAR_W * exp_ratio, 9)
+        self.exp_canvas.coords(self.exp_bar, 0, 5, BAR_W * exp_ratio, 15)
         self.exp_canvas.itemconfig(
             self.exp_text, text=f"EXP {player.exp} / {exp_need}"
         )

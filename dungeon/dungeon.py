@@ -41,15 +41,40 @@ class Tile(IntEnum):
 
 _CHAR_TO_TILE = {"#": Tile.WALL, ".": Tile.FLOOR, "+": Tile.DOOR, ">": Tile.STAIRS}
 
+# 趣味房间类型。放在地形模块里，因为它决定"站在这一格会发生什么"，
+# 属于规则层概念；界面只负责按类型取颜色与字符。
+ROOM_FEATURES: frozenset[str] = frozenset({"heal", "vault", "trap", "shrine"})
+
+# 每种房间的显示名与地图字符（字符仅在没有图标素材时使用）
+FEATURE_LABELS: dict[str, str] = {
+    "heal": "治疗泉",
+    "vault": "宝库",
+    "trap": "陷阱房",
+    "shrine": "力量祭坛",
+}
+FEATURE_GLYPHS: dict[str, str] = {
+    "heal": "≈",
+    "vault": "$",
+    "trap": "×",
+    "shrine": "†",
+}
+
 
 @dataclass
 class Room:
-    """矩形房间，用左上角坐标加宽高表示。"""
+    """矩形房间，用左上角坐标加宽高表示。
+
+    ``feature`` 标记这个房间被赋予了哪种"趣味房间"玩法（见
+    ``config.FLOOR_PROFILE`` 的 ``room`` 字段）。它只是生成期的标记，
+    真正生效的是 ``Dungeon.features`` 里的坐标 → 类型映射——因为读档时
+    房间几何不会恢复（存档只存地形字符），只有坐标化之后的特性才能持久化。
+    """
 
     x: int
     y: int
     w: int
     h: int
+    feature: str = ""
 
     @property
     def center(self) -> tuple[int, int]:
@@ -103,6 +128,10 @@ class Dungeon:
         self.visible: set[tuple[int, int]] = set()      # 当前视野内
         self.explored: set[tuple[int, int]] = set()     # 曾经看到过
         self.floor_cells: list[tuple[int, int]] = []    # 所有可走格，缓存随机落点用
+        # 趣味房间的坐标化标记：{(x, y): "heal"/"vault"/"trap"/"shrine"}
+        # 之所以按坐标存而不是按 Room 存，是因为存档只恢复地形字符、不恢复房间，
+        # 坐标是唯一能在读档后仍然有效的表示。
+        self.features: dict[tuple[int, int], str] = {}
 
     # ------------------------------------------------------------ 查询
     def in_bounds(self, x: int, y: int) -> bool:
@@ -227,6 +256,41 @@ class Dungeon:
         if not candidates:
             return self.floor_cells[0]
         return rng.choice(candidates)
+
+    # ------------------------------------------------------------ 趣味房间
+    def assign_feature(
+        self,
+        kind: str,
+        rng: Rng,
+        reserved: set[tuple[int, int]] | None = None,
+    ) -> tuple[int, int] | None:
+        """给某个非出生房间挂一个趣味玩法，返回触发坐标（房间中心）。
+
+        选择策略：宝库优先挑面积最大的房间（要放得下额外道具和守卫），
+        其余类型随机挑。出生房间永远不选——开局就踩到陷阱/祭坛是纯粹的恶心。
+        ``reserved`` 用来避开楼梯、已有特性等已被占用的格子。
+        """
+        if kind not in ROOM_FEATURES or len(self.rooms) < 2:
+            return None
+        taken = reserved or set()
+        candidates = [
+            room
+            for room in self.rooms[1:]
+            if room.center not in taken and room.center not in self.features
+        ]
+        if not candidates:
+            return None
+        if kind == "vault":
+            room = max(candidates, key=lambda r: r.area)
+        else:
+            room = rng.choice(candidates)
+        room.feature = kind
+        self.features[room.center] = kind
+        return room.center
+
+    def feature_at(self, x: int, y: int) -> str:
+        """取某格的趣味玩法类型；没有则返回空串。"""
+        return self.features.get((x, y), "")
 
     # ------------------------------------------------------------ 视野
     def compute_fov(self, px: int, py: int, radius: int = config.FOV_RADIUS) -> None:

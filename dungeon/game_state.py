@@ -18,7 +18,7 @@ from typing import Any, Callable, Iterable
 
 from . import config
 from .combat import resolve_attack
-from .dungeon import Dungeon, Tile
+from .dungeon import FEATURE_GLYPHS, FEATURE_LABELS, ROOM_FEATURES, Dungeon, Tile
 from .item import Item, item_from_dict, make_item, roll_item
 from .monster import MONSTER_BY_KIND, Monster, roll_monster
 from .patterns import chebyshev, pattern_tiles
@@ -65,6 +65,9 @@ class GameState:
         started_at: str | None = None,
         max_floor: int = 1,
         floor_turns: dict[int, int] | None = None,
+        used_features: set[tuple[int, int]] | None = None,
+        adaptive_difficulty: bool = True,
+        difficulty: str = config.DEFAULT_DIFFICULTY,
     ) -> None:
         self.rng = rng
         self.player = player
@@ -78,13 +81,27 @@ class GameState:
         self.started_at = started_at or datetime.now().isoformat(timespec="seconds")
         self.max_floor = max_floor
         self.floor_turns: dict[int, int] = floor_turns or {str(floor): 0}  # type: ignore[assignment]
+        # 已经触发过的趣味房间（一次性），按坐标记，换层时清空
+        self.used_features: set[tuple[int, int]] = used_features or set()
+        # 是否启用自适应难度（设置项，默认开；关掉后完全按剖面表走）
+        self.adaptive_difficulty: bool = adaptive_difficulty
+        # 难度预设（easy/normal/hard），只影响对手强度
+        self.difficulty: str = (
+            difficulty if difficulty in config.DIFFICULTY_PRESETS else config.DEFAULT_DIFFICULTY
+        )
 
         self.log: deque[LogEntry] = deque(maxlen=200)
         self.events: list[dict[str, Any]] = []
 
     # ================================================================ 构造
     @classmethod
-    def new_game(cls, seed: int | None = None, name: str = "冒险者") -> "GameState":
+    def new_game(
+        cls,
+        seed: int | None = None,
+        name: str = "冒险者",
+        adaptive_difficulty: bool = True,
+        difficulty: str = config.DEFAULT_DIFFICULTY,
+    ) -> "GameState":
         """开一局新游戏。``seed`` 为 None 时由系统随机生成。"""
         rng = Rng(seed)
         player = Player.create_new(name)
@@ -95,16 +112,24 @@ class GameState:
             monsters=[],
             items_on_floor={},
             started_at=datetime.now().isoformat(timespec="seconds"),
+            adaptive_difficulty=adaptive_difficulty,
+            difficulty=difficulty,
         )
         state.floor_turns = {"1": 0}
         state._build_floor(1)
         state._log(f"你踏入了地下城第 1 层，种子 {rng.seed}", LOG_SYSTEM)
-        state._log("方向键/WASD 移动；右键或 F 瞄准攻击；蓝色是你能打的格子，红色是敌人即将落下的区域", LOG_SYSTEM)
+        state._log("方向键/WASD 移动；右键或 F 瞄准攻击；蓝色是你能打的格子，敌人锁定的区域各有颜色", LOG_SYSTEM)
         return state
 
     # ---------------------------------------------------------------- 楼层构建
     def _build_floor(self, floor: int) -> None:
-        """生成一层地牢并放置玩家、楼梯、怪物与道具。"""
+        """生成一层地牢并放置玩家、楼梯、怪物与道具。
+
+        难度不是线性递增，而是按 ``config.FLOOR_PROFILE`` 的**锯齿剖面**排布：
+        尖峰层（3/7/9）之后紧跟释放层（4/8），释放层配一个恢复房间。
+        这样玩家在每一段高压之后都有一段可呼吸的空间，符合 Schell 在
+        《The Art of Game Design》里给出的"兴趣曲线 / 张弛"结构。
+        """
         self.floor = floor
         self.player.floor = floor
         self.max_floor = max(self.max_floor, floor)
@@ -122,6 +147,8 @@ class GameState:
         else:
             dungeon.stairs = None
 
+        profile = self.floor_profile(floor)
+
         # 怪物不得出现在出生房间，否则开局就被围殴
         occupied: set[tuple[int, int]] = set()
         for cell in dungeon.rooms[0].inner_cells():
@@ -131,19 +158,34 @@ class GameState:
             occupied.add(dungeon.stairs)
 
         self.monsters = []
-        count = min(
-            config.MONSTER_COUNT_BASE + config.MONSTER_COUNT_PER_FLOOR * (floor - 1),
-            config.MONSTER_COUNT_MAX,
+        preset = config.DIFFICULTY_PRESETS.get(
+            self.difficulty, config.DIFFICULTY_PRESETS[config.DEFAULT_DIFFICULTY]
         )
+        count = self._monster_count_for(profile)
+        elites_left = round(profile.get("elites", 0) * preset["elite_mult"])
         if floor == config.BOSS_FLOOR:
-            # BOSS 层只留少量杂兵，让最终战的主角是深渊领主本身，
-            # 而不是"先被十几只小怪耗光药水，再去打 BOSS"
-            count = 6
-        for _ in range(count):
+            # BOSS 层只留少量杂兵，让最终战的主角是深渊领主本身
+            count = profile.get("monsters", 6)
+            elites_left = 0
+        for index in range(count):
             proto = roll_monster(self.rng, floor)
             pos = dungeon.random_floor(self.rng, occupied)
             occupied.add(pos)
-            self.monsters.append(Monster(proto, pos[0], pos[1], floor))
+            # 治疗怪不做精英：它的价值是"优先击杀目标"，加血量反而更拖
+            elite = (
+                elites_left > 0
+                and not proto.is_support
+                and not proto.is_boss
+                and proto.min_floor <= floor
+            )
+            if elite:
+                elites_left -= 1
+            self.monsters.append(
+                Monster(
+                    proto, pos[0], pos[1], floor,
+                    elite=elite, hp_mult=preset["hp_mult"],
+                )
+            )
 
         # BOSS：放在离玩家最远的可走格
         if floor == config.BOSS_FLOOR:
@@ -163,7 +205,100 @@ class GameState:
             item = make_item("potion_small") if index == 0 else roll_item(self.rng, floor)
             self.items_on_floor[pos] = item
 
+        # 趣味房间放在道具之后：宝库要额外塞道具，陷阱房要在中心放诱饵
+        self.used_features = set()
+        self._place_feature(profile.get("room", ""), occupied)
+
         dungeon.compute_fov(self.player.x, self.player.y)
+
+    def floor_profile(self, floor: int) -> dict[str, Any]:
+        """取某一层的难度剖面；表外楼层用"最后一档 + 线性递增"兜底。"""
+        if floor in config.FLOOR_PROFILE:
+            return config.FLOOR_PROFILE[floor]
+        # 兜底：超过预设最深层的层数（例如以后扩展地图）继续小幅加压
+        last = config.FLOOR_PROFILE[max(config.FLOOR_PROFILE)]
+        step = max(0, floor - max(config.FLOOR_PROFILE))
+        return {
+            "monsters": min(
+                config.MONSTER_COUNT_MAX, last["monsters"] + 2 * step
+            ),
+            "elites": min(3, last.get("elites", 0) + (1 if step % 2 else 0)),
+            "room": "",
+            "note": "预设表外的自动加压",
+        }
+
+    def _monster_count_for(self, profile: dict[str, Any]) -> int:
+        """按剖面取怪物数量，并叠加可选的自适应难度。
+
+        自适应部分刻意做得**很小且只增不减玩家实力**（Hunicke 2005 的核心
+        约束：DDA 必须隐蔽、不能削弱玩家、不能破坏已建立的节奏）。这里最多
+        只调整 ±2 只小怪，且不改变尖峰/释放的层间结构，所以玩家感知不到
+        "游戏在偷偷放水"，但连续三层的极端体验会被拉回心流通道内。
+        """
+        count = int(profile.get("monsters", config.MONSTER_COUNT_BASE))
+        preset = config.DIFFICULTY_PRESETS.get(
+            self.difficulty, config.DIFFICULTY_PRESETS[config.DEFAULT_DIFFICULTY]
+        )
+        count = max(2, round(count * preset["monster_mult"]))
+        if not self.adaptive_difficulty or self.floor == config.BOSS_FLOOR:
+            return min(config.MONSTER_COUNT_MAX, count)
+        hp_ratio = self.player.hp / max(1, self.player.max_hp)
+        if hp_ratio >= config.DDA_HIGH_HP_RATIO and self.player.kills >= self.floor * 3:
+            # 打得太顺：多放两只，但不超过上限
+            count += min(config.DDA_MAX_DELTA, 2)
+        elif hp_ratio <= config.DDA_LOW_HP_RATIO:
+            # 快被打崩：少放两只，给一口气
+            count -= min(config.DDA_MAX_DELTA, 2)
+        return max(2, min(config.MONSTER_COUNT_MAX, count))
+
+    def _place_feature(self, kind: str, occupied: set[tuple[int, int]]) -> None:
+        """在非出生房间放置一个趣味玩法，并按类型补内容。"""
+        if not kind:
+            return
+        spot = self.dungeon.assign_feature(kind, self.rng, occupied)
+        if spot is None:
+            return
+        occupied.add(spot)
+        label = FEATURE_LABELS.get(kind, kind)
+
+        if kind == "vault":
+            # 宝库：房间中心周围塞满道具，外加两名精英看守
+            room = next((r for r in self.dungeon.rooms if r.center == spot), None)
+            cells = list(room.inner_cells()) if room else [spot]
+            self.rng.shuffle(cells)
+            for cell in cells[: config.ROOM_VAULT_ITEMS]:
+                if cell in occupied or cell in self.items_on_floor:
+                    continue
+                self.items_on_floor[cell] = roll_item(self.rng, self.floor + 1)
+                occupied.add(cell)
+            guards = 0
+            # 轻松档承诺"没有精英"，宝库守卫也要遵守；其他档位守卫固定为精英
+            guard_elite = config.DIFFICULTY_PRESETS.get(
+                self.difficulty, config.DIFFICULTY_PRESETS[config.DEFAULT_DIFFICULTY]
+            )["elite_mult"] > 0
+            for cell in cells:
+                if guards >= 2:
+                    break
+                if cell in occupied:
+                    continue
+                proto = roll_monster(self.rng, self.floor)
+                if proto.is_support or proto.is_boss:
+                    continue
+                self.monsters.append(
+                    Monster(
+                        proto, cell[0], cell[1], self.floor, elite=guard_elite
+                    )
+                )
+                occupied.add(cell)
+                guards += 1
+            self._log(f"你察觉到一间{label}：满地财宝，但有人守着", LOG_SYSTEM)
+        elif kind == "trap":
+            # 陷阱房：中心放一件好道具当诱饵，踩上去会触发机关
+            if spot not in self.items_on_floor:
+                self.items_on_floor[spot] = roll_item(self.rng, self.floor + 1)
+            self._log(f"前方的{label}透着一股不安的气息", LOG_SYSTEM)
+        else:
+            self._log(f"这一层有一处{label}", LOG_SYSTEM)
 
     # ================================================================ 查询
     def monster_at(self, x: int, y: int) -> Monster | None:
@@ -218,10 +353,66 @@ class GameState:
                 self._log("你挪动脚步，蓄力被打断了", LOG_SYSTEM)
             self.player.move_to(nx, ny)
             self.player.steps += 1
+            # 先触发房间机制，再拾取：陷阱房是"先挨一下，再拿到诱饵"
+            self._trigger_feature()
             self._auto_pickup()
             return True
 
         return self._take_turn(act)
+
+    # ---------------------------------------------------------------- 趣味房间
+    def _trigger_feature(self) -> None:
+        """玩家踏入某格时结算该格的趣味房间效果（每处只触发一次）。
+
+        这些房间是难度曲线里的"节拍器"：治疗泉与宝库是**释放**，
+        陷阱房与祭坛是**主动选择的尖峰**——玩家可以绕开，也可以为了收益
+        承担风险，这正是 Schell 所说的"三角形"风险回报结构。
+        """
+        pos = self.player.pos
+        kind = self.dungeon.feature_at(*pos)
+        if not kind or pos in self.used_features:
+            return
+        if kind not in ROOM_FEATURES:
+            return
+        label = FEATURE_LABELS.get(kind, kind)
+
+        if kind == "heal":
+            amount = max(1, round(self.player.max_hp * config.ROOM_HEAL_RATIO))
+            healed = self.player.heal(amount)
+            self.used_features.add(pos)
+            self._log(f"{label}泛起微光，你回复了 {healed} 点生命", LOG_LEVEL)
+            self._emit("heal", x=pos[0], y=pos[1], text=f"+{healed}")
+        elif kind == "trap":
+            damage = max(1, round(self.player.hp * config.ROOM_TRAP_RATIO))
+            actual = self.player.take_damage(damage)
+            self.player.damage_taken += actual
+            self.used_features.add(pos)
+            self._log(f"{label}的机关弹出，你受到 {actual} 点伤害", LOG_DANGER)
+            self._emit("damage", x=pos[0], y=pos[1], text=f"-{actual}", tone="hurt")
+            if not self.player.alive:
+                self.status = GameStatus.DEAD
+                self.death_cause = f"{label}的机关"
+        elif kind == "shrine":
+            ratio = self.player.hp / max(1, self.player.max_hp)
+            if ratio < config.ROOM_SHRINE_MIN_HP_RATIO:
+                # 拒绝交易时不消耗这次机会：先养伤，回头还能再来
+                self._log(
+                    f"{label}拒绝了你：生命太虚弱，先养好伤再来", LOG_SYSTEM
+                )
+                return
+            cost = max(1, round(self.player.hp * config.ROOM_SHRINE_HP_COST))
+            self.player.take_damage(cost)
+            self.player.atk += config.ROOM_SHRINE_ATK_BONUS
+            self.used_features.add(pos)
+            self._log(
+                f"{label}吸走你 {cost} 点生命，作为交换，攻击永久 +"
+                f"{config.ROOM_SHRINE_ATK_BONUS}",
+                LOG_LEVEL,
+            )
+            self._emit("levelup", x=pos[0], y=pos[1], text="ATK UP")
+        elif kind == "vault":
+            self.used_features.add(pos)
+            self._log(f"你踏入了{label}的中心，宝光刺眼", LOG_ITEM)
 
     # ---------------------------------------------------------------- 攻击
     def attack_tiles(self, x: int, y: int, slot: str = "weapon") -> frozenset[tuple[int, int]]:
@@ -496,7 +687,12 @@ class GameState:
             self._monster_turn(monster)
 
     def _monster_turn(self, monster: Monster) -> None:
-        """单只怪物的回合：蓄力中推进计数，否则判断能否起手，最后才考虑走位。"""
+        """单只怪物的回合：治疗兵先走治疗逻辑，其余按"蓄力→起手→走位"顺序。"""
+        # 0) 治疗怪：不攻击，只回血；没人可治时后退拉开距离
+        if monster.is_support:
+            self._support_turn(monster)
+            return
+
         # 1) 已经锁定了打击区域：原地维持，计数归零就落下
         if monster.charge_left > 0:
             monster.charge_left -= 1
@@ -510,7 +706,7 @@ class GameState:
             monster.begin_charge(tiles)
             self._log(
                 f"{monster.name}开始蓄力（{monster.range_text}），"
-                f"{monster.charge_turns} 回合后出手——离开红框！",
+                f"{monster.charge_turns} 回合后出手——离开它标记的区域！",
                 LOG_DANGER,
             )
             self._emit("telegraph", x=monster.x, y=monster.y)
@@ -530,6 +726,50 @@ class GameState:
         if step is not None and not self._blocked_by_actor(monster, *step):
             monster.move_to(*step)
 
+    def _support_turn(self, monster: Monster) -> None:
+        """治疗兵的回合：优先给最虚弱的同伴回血，没得治就后退。
+
+        "后退"而不是"发呆"是有意为之：如果它站着不动，玩家可以把它留到最后
+        慢慢砍；让它主动拉开距离，才会形成"先杀治疗"的真实压力。
+        """
+        allies = [
+            other
+            for other in self.monsters
+            if other.alive
+            and other is not monster
+            and chebyshev((monster.x, monster.y), (other.x, other.y)) <= monster.reach
+            and self.dungeon.has_line_of_sight(
+                monster.x, monster.y, other.x, other.y
+            )
+        ]
+        picked = monster.heal_target(allies)
+        if picked is not None:
+            target, amount = picked
+            healed = target.heal(amount)
+            if healed > 0:
+                self._log(
+                    f"{monster.name}为{target.name}注入暗影愈合，回复 {healed} 点生命",
+                    LOG_DANGER if target is not monster else LOG_COMBAT,
+                )
+                self._emit("heal", x=target.x, y=target.y, text=f"+{healed}")
+                return
+        self._retreat(monster)
+
+    def _retreat(self, monster: Monster) -> None:
+        """朝"离玩家更远"的方向退一步；无路可退就原地不动。"""
+        current = chebyshev((monster.x, monster.y), self.player.pos)
+        best: tuple[int, int] | None = None
+        best_distance = current
+        for nx, ny in Dungeon.neighbors4(monster.x, monster.y):
+            if not self.dungeon.is_walkable(nx, ny) or self._blocked_by_actor(monster, nx, ny):
+                continue
+            distance = chebyshev((nx, ny), self.player.pos)
+            if distance > best_distance:
+                best_distance = distance
+                best = (nx, ny)
+        if best is not None:
+            monster.move_to(*best)
+
     def _blocked_by_actor(self, mover: Monster, x: int, y: int) -> bool:
         """目标格是否被玩家或别的怪物占着。"""
         if (x, y) == self.player.pos:
@@ -537,7 +777,13 @@ class GameState:
         return any(m.alive and m is not mover and (m.x, m.y) == (x, y) for m in self.monsters)
 
     def _enemy_pattern(self, monster: Monster) -> frozenset[tuple[int, int]]:
-        """怪物朝玩家方向的攻击形状（远程还要检查视线）。"""
+        """怪物朝玩家方向的攻击形状（远程还要检查视线）。
+
+        治疗兵没有攻击形状：``pattern_tiles`` 只认四种攻击形态，
+        把 ``support`` 传进去会直接抛错，所以这里必须提前返回空集。
+        """
+        if monster.is_support:
+            return frozenset()
         if monster.pattern == "ranged" and not self.dungeon.has_line_of_sight(
             monster.x, monster.y, self.player.x, self.player.y
         ):
@@ -665,6 +911,11 @@ class GameState:
                 "rows": self.dungeon.to_rows(),
                 "stairs": list(self.dungeon.stairs) if self.dungeon.stairs else None,
                 "explored": sorted(f"{x},{y}" for x, y in self.dungeon.explored),
+                # 房间几何不存，只存"坐标 → 玩法"的映射，读档后依然能触发
+                "features": [
+                    {"x": pos[0], "y": pos[1], "kind": kind}
+                    for pos, kind in sorted(self.dungeon.features.items())
+                ],
             },
             "monsters": [m.to_dict() for m in self.monsters],
             "items": [
@@ -680,6 +931,11 @@ class GameState:
                 "floor_turns": self.floor_turns,
                 "turn": self.turn,
                 "floor": self.floor,
+                "adaptive_difficulty": self.adaptive_difficulty,
+                "difficulty": self.difficulty,
+                "used_features": [
+                    f"{x},{y}" for x, y in sorted(self.used_features)
+                ],
             },
         }
 
@@ -705,6 +961,11 @@ class GameState:
             stairs_raw = dungeon_data.get("stairs")
             stairs = (int(stairs_raw[0]), int(stairs_raw[1])) if stairs_raw else None
             dungeon = Dungeon.from_rows(dungeon_data["rows"], stairs, explored)
+            # 旧存档（v2 及更早）没有 features 字段，读回来就是"这一层没有趣味房间"
+            for entry in dungeon_data.get("features", []):
+                kind = str(entry.get("kind", ""))
+                if kind in ROOM_FEATURES:
+                    dungeon.features[(int(entry["x"]), int(entry["y"]))] = kind
 
             monsters = [Monster.from_dict(d) for d in data.get("monsters", [])]
             items: dict[tuple[int, int], Item] = {}
@@ -712,6 +973,10 @@ class GameState:
                 items[(int(entry["x"]), int(entry["y"]))] = item_from_dict(entry)
 
             progress = data.get("progress", {})
+            used_features = {
+                (int(pair.split(",")[0]), int(pair.split(",")[1]))
+                for pair in progress.get("used_features", [])
+            }
             state = cls(
                 rng=rng,
                 player=player,
@@ -725,6 +990,9 @@ class GameState:
                 started_at=progress.get("started_at"),
                 max_floor=int(progress.get("max_floor", 1)),
                 floor_turns={str(k): int(v) for k, v in (progress.get("floor_turns") or {}).items()},
+                used_features=used_features,
+                adaptive_difficulty=bool(progress.get("adaptive_difficulty", True)),
+                difficulty=str(progress.get("difficulty", config.DEFAULT_DIFFICULTY)),
             )
             for entry in data.get("log", []):
                 state.log.append((str(entry.get("text", "")), str(entry.get("tag", LOG_SYSTEM))))

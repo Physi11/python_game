@@ -125,6 +125,18 @@ class Weapon(Item):
         """显示名，带强化等级（如「铁剑 +2」）。"""
         return f"{self.name} +{self.upgrade_level}" if self.upgrade_level else self.name
 
+    @property
+    def equip_slot(self) -> str:
+        """这把武器该写进 ``equipment`` 的哪个键。
+
+        注意区分两个"槽位"概念：``slot`` 是**武器分类**（``melee`` 近战 /
+        ``ranged`` 远程），而 ``Player.equipment`` 的键是 ``weapon`` / ``ranged``
+        / ``armor``。早先把 ``slot`` 直接当字典键写入，近战武器被塞进
+        ``equipment["melee"]`` 这个凭空出现的键，面板与战斗都读 ``weapon``，
+        于是"换了剑却没反应"——这个属性就是这层映射的唯一出口。
+        """
+        return "weapon" if self.slot == "melee" else self.slot
+
     def restore_upgrade(self, level: int) -> None:
         """按存档里的强化等级重放，并截断到上限。
 
@@ -151,13 +163,38 @@ class Weapon(Item):
         return "贴身 1 格"
 
     def apply(self, player: "Player", state: Any = None) -> tuple[bool, str]:
-        old = player.equipment.get(self.slot)
+        old = player.equipment.get(self.equip_slot)
         if old is not None and old.key == self.key:
             return False, f"已经装备着{self.name}了"
+        # 只允许"更强"的武器替换：同级或更弱的一律拒绝，避免误操作把好武器换掉。
+        # 比较用的是含强化加成的 atk_bonus，所以"铁剑 +3（+5）"不会被"符文长剑（+5）"
+        # 换掉，也不会因为背包里捡到一把白板同款就把 +3 顶掉。
+        if old is not None and not self.is_stronger_than(old):
+            return False, (
+                f"{old.title}（攻击 +{old.atk_bonus}）不弱于{self.title}"
+                f"（攻击 +{self.atk_bonus}），保留现有武器"
+            )
         player.equip(self)
         player.items_used += 1
         replaced = f"，替换下{old.name}" if old is not None else ""
-        return True, f"装备{self.name}（{self.slot_name} · 攻击 +{self.atk_bonus}）{replaced}"
+        return True, f"装备{self.title}（{self.slot_name} · 攻击 +{self.atk_bonus}）{replaced}"
+
+    def is_stronger_than(self, other: "Item") -> bool:
+        """是否严格强于 ``other``（用于换装门槛与自动装备判断）。
+
+        先看攻击加成：严格更高就算更强。若攻击相同，再比"出手代价"——
+        无需蓄力的武器优于需要蓄力的；最后比射程，远的那把更灵活。
+        这样"同级"的判定不是简单的数值相等，而是综合战力比较。
+        """
+        mine = getattr(self, "atk_bonus", 0)
+        theirs = getattr(other, "atk_bonus", 0)
+        if mine != theirs:
+            return mine > theirs
+        my_charge = getattr(self, "charge", 0)
+        their_charge = getattr(other, "charge", 0)
+        if my_charge != their_charge:
+            return my_charge < their_charge      # 蓄力更短更优
+        return getattr(self, "reach", 1) > getattr(other, "reach", 1)
 
     def describe(self) -> str:
         extra = f"蓄力 {self.charge} 回合" if self.charge else "即时出手"
@@ -194,10 +231,16 @@ class Armor(Item):
         old = player.equipment.get("armor")
         if old is not None and old.key == self.key:
             return False, f"已经穿着{self.name}了"
+        # 与武器同一条规则：只允许更强的护甲替换，避免把锁子甲换成皮甲
+        if old is not None and self.def_bonus <= old.def_bonus:
+            return False, (
+                f"{old.title}（防御 +{old.def_bonus}）不弱于{self.title}"
+                f"（防御 +{self.def_bonus}），保留现有护甲"
+            )
         player.equip(self)
         player.items_used += 1
         replaced = f"，替换下{old.name}" if old is not None else ""
-        return True, f"穿上{self.name}（防御 +{self.def_bonus}）{replaced}"
+        return True, f"穿上{self.title}（防御 +{self.def_bonus}）{replaced}"
 
     def to_dict(self) -> dict[str, Any]:
         data = super().to_dict()
@@ -265,8 +308,8 @@ _ITEM_DEFS: dict[str, dict[str, Any]] = {
         "slot": "melee", "pattern": "melee", "reach": 1, "charge": 0,
     },
     "sword_rune": {
-        "factory": Weapon, "name": "符文长剑", "desc": "攻击 +4",
-        "atk_bonus": 4, "min_floor": 4,
+        "factory": Weapon, "name": "符文长剑", "desc": "攻击 +5",
+        "atk_bonus": 5, "min_floor": 4,
         "slot": "melee", "pattern": "melee", "reach": 1, "charge": 0,
     },
     "blade_abyss": {
@@ -280,8 +323,8 @@ _ITEM_DEFS: dict[str, dict[str, Any]] = {
         "slot": "melee", "pattern": "line", "reach": 3, "charge": 0,
     },
     "greatsword": {
-        "factory": Weapon, "name": "巨刃", "desc": "攻击 +8，身前三格横扫",
-        "atk_bonus": 8, "min_floor": 6,
+        "factory": Weapon, "name": "巨刃", "desc": "攻击 +9，身前三格横扫",
+        "atk_bonus": 9, "min_floor": 8,
         "slot": "melee", "pattern": "arc", "reach": 2, "charge": 1,
     },
     "bow_short": {

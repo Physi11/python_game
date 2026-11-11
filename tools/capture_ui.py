@@ -64,7 +64,7 @@ def grab(window, path: Path, app: App) -> None:
 
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    app = App(seed=20261025)
+    app = App(seed=20261025, show_start=False)
     app.attributes("-topmost", True)
     app.lift()
     pump(app)
@@ -88,18 +88,39 @@ def main() -> int:
     pump(app)
     grab(app, OUT_DIR / "02_探索与战斗.png", app)
 
-    # 2.5) 策略战斗：红色预告 + 头顶倒计时 + 蓝色瞄准范围
+    # 2.5) 策略战斗：逐敌配色的预告 + 右上角倒计时 + 蓝色瞄准范围
     from dungeon.monster import MONSTER_BY_KIND, Monster
+    from dungeon.patterns import pattern_tiles
 
     st = app.state
     hero = st.player
-    for kind, dx, dy in (("spearman", 2, 0), ("archer", 1, -2), ("swordsman", 0, 2)):
-        extra = Monster(MONSTER_BY_KIND[kind], hero.x + dx, hero.y + dy, 1)
-        if st.dungeon.is_walkable(extra.x, extra.y):
-            st.monsters.append(extra)
+    # 清掉原有杂兵，只摆演示用的几只：一张图要同时讲清"逐敌配色""精英""治疗怪"
+    st.monsters = []
+    demo = (
+        ("spearman", 2, 0, False),
+        ("archer", -2, 1, False),
+        ("swordsman", 0, 2, True),      # 精英：金色描边
+        ("shaman", -1, 2, False),       # 治疗怪：青绿描边
+    )
+    for kind, dx, dy, elite in demo:
+        spot = (hero.x + dx, hero.y + dy)
+        if not st.dungeon.is_walkable(*spot):
+            continue
+        extra = Monster(MONSTER_BY_KIND[kind], spot[0], spot[1], 1, elite=elite)
+        if not extra.is_support:
+            extra.begin_charge(
+                pattern_tiles(
+                    extra.pos, hero.pos, extra.pattern, extra.reach,
+                    extra.min_reach,
+                    blocked=lambda cx, cy: not st.dungeon.is_walkable(cx, cy),
+                )
+            )
+        st.monsters.append(extra)
+    # 顺带摆两个趣味房间，让截图能看出房间字符
+    for (fx, fy), kind in (((hero.x + 3, hero.y), "heal"), ((hero.x - 3, hero.y), "vault")):
+        if st.dungeon.is_walkable(fx, fy):
+            st.dungeon.features[(fx, fy)] = kind
     st.dungeon.compute_fov(hero.x, hero.y)
-    app._refresh()
-    st.wait()                     # 让敌人起手蓄力，红框与倒计时才会出现
     app._refresh()
     app._enter_aim("weapon")
     app._update_aim((hero.x + 1, hero.y))
@@ -156,6 +177,20 @@ def main() -> int:
     pump(app, times=10, delay=0.05)
     grab(leader_win, OUT_DIR / "07_排行榜.png", app)
     leader_win.destroy()
+    pump(app)
+
+    # 8) 设置面板
+    settings_win = dialogs.show_settings(app, app.theme, app.settings)
+    pump(app, times=10, delay=0.05)
+    grab(settings_win, OUT_DIR / "09_设置.png", app)
+    settings_win.destroy()
+    pump(app)
+
+    # 9) 开始界面：最后再盖上去，盖住游戏画面
+    app.show_start_screen()
+    pump(app, times=12, delay=0.05)
+    grab(app, OUT_DIR / "10_开始界面.png", app)
+    app.hide_start_screen()
 
     app.destroy()
     print("截图完成。")

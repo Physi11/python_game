@@ -144,16 +144,31 @@ class AutoPlayer:
 
     # ------------------------------------------------------------ 内部工具
     def _in_danger_now(self) -> bool:
-        """脚下是否压在"下一回合就会落下"的红色预警里。
+        """脚下是否压在"下一回合就会落下、而且值得躲"的预警里。
 
-        只在敌人 charge_left <= 1 时才躲：否则会陷入"敌人一起手就躲、
-        躲完敌人又起手"的空转循环，永远打不出输出。
+        两段判断，缺一不可：
+
+        1. **时间**：只看 ``charge_left <= 1`` 的敌人。否则会陷入"敌人一起手
+           就躲、躲完敌人又起手"的空转。
+        2. **代价**：这一击预计会造成多少伤害。如果只是掉个零头，站着挨一下
+           把这一刀砍出去更划算——真实玩家也是这么权衡的。只有可能打掉
+           25% 以上生命（或直接致命）时才让位。
+
+        只做第一段判断时，场上敌人一多就总有人"下回合出手"，机器人会
+        整局都在躲，4000 回合都打不完一层。
         """
-        pos = self.state.player.pos
-        return any(
-            m.alive and pos in m.telegraph and m.charge_left <= 1
-            for m in self.state.monsters
-        )
+        player = self.state.player
+        pos = player.pos
+        defense = player.total_def()
+        incoming = 0
+        for m in self.state.monsters:
+            if m.alive and pos in m.telegraph and m.charge_left <= 1:
+                incoming += max(1, m.atk - defense)
+        if incoming <= 0:
+            return False
+        if incoming >= player.hp:            # 会被打死，必躲
+            return True
+        return incoming >= player.hp * 0.25  # 重伤才让位，轻伤照打
 
     def _step_out_of_danger(self) -> tuple[int, int] | None:
         """找一个既不在红框、也不被占用的相邻格。"""
@@ -173,14 +188,21 @@ class AutoPlayer:
         return None
 
     def _best_target(self):
-        """挑一个当前就能打到的敌人，优先血少的。"""
+        """挑一个当前就能打到的敌人。
+
+        优先级：治疗怪 > 血少的。治疗怪每回合给同伴回血，放着不管会让
+        整场战斗的输出被抵消掉，所以真实玩家也会先点它。
+        """
         state = self.state
         reachable = [
             m for m in state.visible_monsters() if self._usable_slot(m) is not None
         ]
         if not reachable:
             return None
-        return min(reachable, key=lambda m: (m.hp, m.distance_to(state.player)))
+        return min(
+            reachable,
+            key=lambda m: (0 if m.is_support else 1, m.hp, m.distance_to(state.player)),
+        )
 
     def _usable_slot(self, monster) -> str | None:
         """这只敌人能用哪个槽位打到；都打不到返回 None。"""
@@ -194,11 +216,16 @@ class AutoPlayer:
         return None
 
     def _find_upgrade(self) -> int | None:
-        """在背包里找一件比当前更好的装备，返回其下标。"""
+        """在背包里找一件比当前更好的装备，返回其下标。
+
+        取装备槽必须走 ``item.equip_slot``：武器的 ``slot`` 是 melee/ranged，
+        而装备字典的键是 weapon/ranged，直接拿 slot 当键会永远读到 None，
+        于是机器人会一直以为"没装备武器"，反复尝试换装直到回合耗尽。
+        """
         player = self.state.player
         for index, item in enumerate(player.inventory):
             if item.kind == "weapon":
-                slot = getattr(item, "slot", "melee")
+                slot = getattr(item, "equip_slot", "weapon")
                 current = player.equipment.get(slot)
                 if current is None or item.atk_bonus > getattr(current, "atk_bonus", 0):
                     return index
