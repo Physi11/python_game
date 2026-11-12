@@ -43,6 +43,7 @@ class AutoPlayer:
     CHASE_RANGE = 3          # 只追击这个距离内的敌人
     HISTORY_LEN = 40         # 位置历史长度，用于震荡检测
     EXPLORE_TURN_BUDGET = 350  # 每层最多花多少回合探索，超时就直奔楼梯
+    DODGE_STREAK_LIMIT = 3   # 连续躲这么多次就强制"拼刀"，打破互相蓄力的死循环
 
     def __init__(self, state: GameState) -> None:
         self.state = state
@@ -50,6 +51,8 @@ class AutoPlayer:
         self.ignore_monsters_until = 0
         self._floor_start_turn = 0
         self._tracked_floor = 0
+        self._dodge_streak = 0        # 连续闪避次数
+        self._trade_mode_until = 0    # 这段时间内不再闪避，站着换血
         self.last_action = ""
 
     def step(self) -> bool:
@@ -79,6 +82,9 @@ class AutoPlayer:
         if self._in_danger_now():
             escape = self._step_out_of_danger()
             if escape is not None:
+                self._dodge_streak += 1
+                if self._dodge_streak >= self.DODGE_STREAK_LIMIT:
+                    self._break_deadlock()
                 self.last_action = "dodge"
                 return state.try_move(*escape)
 
@@ -87,6 +93,8 @@ class AutoPlayer:
         if target is not None:
             slot = self._usable_slot(target)
             if slot is not None:
+                # 打出去了，说明闪避循环已被打破
+                self._dodge_streak = 0
                 self.last_action = f"attack:{slot}:{target.name}"
                 return state.attack_at(target.x, target.y, slot)
 
@@ -119,7 +127,13 @@ class AutoPlayer:
                 self.ignore_monsters_until = state.turn + 60
 
         # 6) 已探索完 → 猎杀剩余敌人（BOSS 层必须清场才能通关）
-        hunt = self._nearest_monster_pos()
+        #    但要有猎杀预算：一层怪有 20 只时，"全清才下楼"会让整局卡在同一层，
+        #    真实玩家清掉大半就会走。超过 2 倍探索预算就直接去楼梯。
+        can_hunt = (
+            self.state.floor == config.BOSS_FLOOR
+            or self._floor_spent_turns() < self.EXPLORE_TURN_BUDGET * 2
+        )
+        hunt = self._nearest_monster_pos() if can_hunt else None
         if hunt is not None:
             step = self._step_towards(hunt)
             if step is not None:
@@ -143,6 +157,26 @@ class AutoPlayer:
         return state.wait()
 
     # ------------------------------------------------------------ 内部工具
+    def _break_deadlock(self) -> None:
+        """连续躲了太多次：要么拼刀、要么彻底脱离战斗。
+
+        这是模拟器里最容易踩的坑。多只敌人轮流蓄力时，"敌人锁我 → 我躲 →
+        它重新蓄力 → 我再躲"可以形成一个**永远不出手**的循环：每回合都在躲，
+        整局打不出一点输出，4000 步都走不完一层（实测 40 局里有 4 局如此）。
+
+        真实玩家不会这么玩：血够就站着换一刀把输出打出去，血不够就直接走人。
+        这里按血量分两种处理：
+        - 血量 > 45%：进入 8 回合的"拼刀模式"，期间不再闪避；
+        - 血量 ≤ 45%：暂时放弃这层怪，脱离战斗去探索/下楼。
+        """
+        self._dodge_streak = 0
+        player = self.state.player
+        hp_ratio = player.hp / max(1, player.max_hp)
+        if hp_ratio > 0.45:
+            self._trade_mode_until = self.state.turn + 8
+        else:
+            self.ignore_monsters_until = self.state.turn + 40
+
     def _in_danger_now(self) -> bool:
         """脚下是否压在"下一回合就会落下、而且值得躲"的预警里。
 
@@ -157,6 +191,9 @@ class AutoPlayer:
         只做第一段判断时，场上敌人一多就总有人"下回合出手"，机器人会
         整局都在躲，4000 回合都打不完一层。
         """
+        # 拼刀模式：主动放弃闪避，先把输出打出去（用于打破闪避死循环）
+        if self.state.turn < self._trade_mode_until:
+            return False
         player = self.state.player
         pos = player.pos
         defense = player.total_def()

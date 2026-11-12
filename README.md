@@ -149,12 +149,16 @@ python tools/capture_ui.py
 python tools/export_icon_slots.py
 ```
 
-实验报告由 `docs/report_source.md` 生成（需要本机运行 WorkBuddy 的本地 Office 服务）：
+课程报告由脚本按 `Python 大作业评分标准.docx` 的章节结构直接生成，
+正文里的代码行数、用例数与平衡数据都在构建时从项目里现取，因此与图表永远一致：
 
 ```bash
-python tools/build_report.py     # 组装 docs/Python程序设计课程报告.docx
-python tools/preview_docx.py     # 借助 Word 导出 PDF 再逐页渲染，用于校版
+python tools/build_report.py          # 生成 docs/Python程序设计课程报告.docx
+python tools/build_report.py --pdf    # 额外用 Word 更新目录域并导出 PDF 供校版
 ```
+
+报告排版在 `tools/docx_kit.py`（样式、表格、插图、伪代码块、目录域、页码域），
+正文内容在 `tools/build_report.py`；两者分开，改文字不必碰排版代码。
 
 ---
 

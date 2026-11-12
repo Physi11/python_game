@@ -60,6 +60,16 @@ test_negative_amount_rejected (test_combat.TestEntityBehavior.test_negative_amou
 负数伤害/治疗属于非法参数，必须抛 ValueError。 ... ok
 test_take_damage_and_death (test_combat.TestEntityBehavior.test_take_damage_and_death)
 扣血到 0 时血量钳制在 0，并标记为死亡。 ... ok
+test_stops_at_max_level (test_craft.TestCraftCap.test_stops_at_max_level) ... ok
+test_merge_when_inventory_full (test_craft.TestCraftFullInventory.test_merge_when_inventory_full) ... ok
+test_forged_level_is_clamped (test_craft.TestCraftSerialization.test_forged_level_is_clamped) ... ok
+test_legacy_item_without_upgrade (test_craft.TestCraftSerialization.test_legacy_item_without_upgrade) ... ok
+test_roundtrip_preserves_upgrade (test_craft.TestCraftSerialization.test_roundtrip_preserves_upgrade) ... ok
+test_armor_merges (test_craft.TestCraftTrigger.test_armor_merges) ... ok
+test_different_weapon_does_not_merge (test_craft.TestCraftTrigger.test_different_weapon_does_not_merge) ... ok
+test_potion_does_not_merge (test_craft.TestCraftTrigger.test_potion_does_not_merge) ... ok
+test_ranged_weapon_merges_into_ranged_slot (test_craft.TestCraftTrigger.test_ranged_weapon_merges_into_ranged_slot) ... ok
+test_same_weapon_merges_into_equipped (test_craft.TestCraftTrigger.test_same_weapon_merges_into_equipped) ... ok
 test_map_fully_connected (test_dungeon.TestDungeonGeneration.test_map_fully_connected)
 从玩家出生点出发，必须能走到楼梯和每个房间中心。 ... ok
 test_rooms_no_overlap (test_dungeon.TestDungeonGeneration.test_rooms_no_overlap)
@@ -76,6 +86,21 @@ test_explored_accumulates (test_dungeon.TestFieldOfView.test_explored_accumulate
 走过的区域会进入 explored，即使离开视野也不会消失。 ... ok
 test_fov_blocked_by_wall (test_dungeon.TestFieldOfView.test_fov_blocked_by_wall)
 墙后面的格子不应该进入视野。 ... ok
+test_melee_weapon_goes_to_weapon_slot (test_equipment.TestEquipSlot.test_melee_weapon_goes_to_weapon_slot) ... ok
+test_panel_and_combat_read_the_same_slot (test_equipment.TestEquipSlot.test_panel_and_combat_read_the_same_slot)
+面板读 ``equipment["weapon"]``，战斗也读它——两者必须是同一把。 ... ok
+test_ranged_weapon_goes_to_ranged_slot (test_equipment.TestEquipSlot.test_ranged_weapon_goes_to_ranged_slot) ... ok
+test_armor_downgrade_is_rejected (test_equipment.TestUpgradeGate.test_armor_downgrade_is_rejected) ... ok
+test_armor_upgrade_is_allowed (test_equipment.TestUpgradeGate.test_armor_upgrade_is_allowed) ... ok
+test_equal_attack_but_longer_reach_wins (test_equipment.TestUpgradeGate.test_equal_attack_but_longer_reach_wins)
+攻击相同时比射程：骨矛（3 格）应当能替换同攻击力的短兵器。 ... ok
+test_same_power_weapon_is_rejected (test_equipment.TestUpgradeGate.test_same_power_weapon_is_rejected) ... ok
+test_stronger_weapon_replaces (test_equipment.TestUpgradeGate.test_stronger_weapon_replaces) ... ok
+test_upgraded_weapon_cannot_be_replaced_by_base_version (test_equipment.TestUpgradeGate.test_upgraded_weapon_cannot_be_replaced_by_base_version)
++3 的铁剑（+5）不该被白板符文长剑（+5）顶掉：攻击相同再看别的。 ... ok
+test_weaker_weapon_is_rejected (test_equipment.TestUpgradeGate.test_weaker_weapon_is_rejected) ... ok
+test_weapon_table_is_monotonic_in_floor (test_equipment.TestUpgradeGate.test_weapon_table_is_monotonic_in_floor)
+越深层的近战武器必须越强，否则"只许更强"会把好武器锁死。 ... ok
 test_exact_key_wins (test_icons.TestLookup.test_exact_key_wins)
 专属图标存在时，不能退到类别或通用。 ... ok
 test_falls_back_to_kind (test_icons.TestLookup.test_falls_back_to_kind) ... ok
@@ -98,6 +123,40 @@ test_shipped_manifest_is_valid (test_icons.TestManifestLoading.test_shipped_mani
 test_tint_is_parsed_and_validated (test_icons.TestManifestLoading.test_tint_is_parsed_and_validated)
 tint 必须是 #rrggbb，写错就忽略而不是让整条图标失效。 ... ok
 test_unsupported_version_rejected (test_icons.TestManifestLoading.test_unsupported_version_rejected) ... ok
+test_disabled_ignores_player_state (test_progression.TestAdaptiveDifficulty.test_disabled_ignores_player_state) ... ok
+test_low_hp_reduces_monsters (test_progression.TestAdaptiveDifficulty.test_low_hp_reduces_monsters) ... ok
+test_never_below_two_monsters (test_progression.TestAdaptiveDifficulty.test_never_below_two_monsters) ... ok
+test_boss_floor_is_the_climax (test_progression.TestDifficultyCurve.test_boss_floor_is_the_climax) ... ok
+test_curve_is_not_monotonic (test_progression.TestDifficultyCurve.test_curve_is_not_monotonic)
+锯齿的证据：至少存在一个"下一层怪更少"的位置。 ... ok
+test_each_spike_has_a_release_room (test_progression.TestDifficultyCurve.test_each_spike_has_a_release_room)
+每个尖峰层之后的一层，必须给一个恢复类房间。 ... ok
+test_every_floor_has_a_profile (test_progression.TestDifficultyCurve.test_every_floor_has_a_profile) ... ok
+test_floor_profile_falls_back_outside_table (test_progression.TestDifficultyCurve.test_floor_profile_falls_back_outside_table) ... ok
+test_easy_has_no_elites (test_progression.TestDifficultyPreset.test_easy_has_no_elites) ... ok
+test_invalid_preset_falls_back_to_normal (test_progression.TestDifficultyPreset.test_invalid_preset_falls_back_to_normal) ... ok
+test_presets_scale_monster_count (test_progression.TestDifficultyPreset.test_presets_scale_monster_count) ... ok
+test_boss_cannot_be_elite (test_progression.TestElite.test_boss_cannot_be_elite) ... ok
+test_elite_is_tougher_and_richer (test_progression.TestElite.test_elite_is_tougher_and_richer) ... ok
+test_elite_keeps_its_attack_pattern (test_progression.TestElite.test_elite_keeps_its_attack_pattern)
+精英不改变攻击形态与蓄力：否则会出现"精英史莱姆蓄力 4 回合"。 ... ok
+test_features_are_cleared_between_floors (test_progression.TestFeatureRooms.test_features_are_cleared_between_floors) ... ok
+test_heal_fountain_restores_and_is_single_use (test_progression.TestFeatureRooms.test_heal_fountain_restores_and_is_single_use) ... ok
+test_shrine_refuses_when_hp_too_low (test_progression.TestFeatureRooms.test_shrine_refuses_when_hp_too_low)
+血量太低时拒绝交易，且**不消耗**这次机会（养好伤还能再来）。 ... ok
+test_shrine_trades_hp_for_attack (test_progression.TestFeatureRooms.test_shrine_trades_hp_for_attack) ... ok
+test_trap_damages_once (test_progression.TestFeatureRooms.test_trap_damages_once) ... ok
+test_vault_spawns_extra_items_and_guards (test_progression.TestFeatureRooms.test_vault_spawns_extra_items_and_guards) ... ok
+test_healer_has_no_attack_pattern (test_progression.TestHealer.test_healer_has_no_attack_pattern) ... ok
+test_healer_retreats_when_nothing_to_heal (test_progression.TestHealer.test_healer_retreats_when_nothing_to_heal) ... ok
+test_healer_turn_heals_and_does_not_damage_player (test_progression.TestHealer.test_healer_turn_heals_and_does_not_damage_player) ... ok
+test_heals_the_weakest_ally (test_progression.TestHealer.test_heals_the_weakest_ally) ... ok
+test_self_heal_is_halved (test_progression.TestHealer.test_self_heal_is_halved)
+没有同伴可治时只能给自己回一半，避免变成打不死的自愈机器。 ... ok
+test_charge_non_decreasing_with_damage (test_progression.TestMonsterTableInvariant.test_charge_non_decreasing_with_damage) ... ok
+test_healer_is_in_the_table (test_progression.TestMonsterTableInvariant.test_healer_is_in_the_table) ... ok
+test_old_save_without_new_fields_still_loads (test_progression.TestProgressionSerialization.test_old_save_without_new_fields_still_loads) ... ok
+test_roundtrip_keeps_features_and_elites (test_progression.TestProgressionSerialization.test_roundtrip_keeps_features_and_elites) ... ok
 test_corrupted_json_raises_and_backs_up (test_save.TestSaveAbnormal.test_corrupted_json_raises_and_backs_up) ... ok
 test_invalid_slot_number (test_save.TestSaveAbnormal.test_invalid_slot_number) ... ok
 test_load_empty_slot_raises (test_save.TestSaveAbnormal.test_load_empty_slot_raises) ... ok
@@ -110,6 +169,21 @@ test_rng_state_reproducible (test_save.TestSaveRoundtrip.test_rng_state_reproduc
 读档后的随机序列必须与存档时完全一致。 ... ok
 test_roundtrip_keeps_state (test_save.TestSaveRoundtrip.test_roundtrip_keeps_state) ... ok
 test_save_then_delete (test_save.TestSaveRoundtrip.test_save_then_delete) ... ok
+test_apply_ignores_unknown_keys (test_settings.TestExtensionChannel.test_apply_ignores_unknown_keys) ... ok
+test_new_spec_is_picked_up_by_settings (test_settings.TestExtensionChannel.test_new_spec_is_picked_up_by_settings) ... ok
+test_corrupted_json_returns_defaults (test_settings.TestPersistence.test_corrupted_json_returns_defaults) ... ok
+test_missing_file_returns_defaults (test_settings.TestPersistence.test_missing_file_returns_defaults) ... ok
+test_reset_restores_defaults_on_disk (test_settings.TestPersistence.test_reset_restores_defaults_on_disk) ... ok
+test_roundtrip (test_settings.TestPersistence.test_roundtrip) ... ok
+test_unknown_keys_are_preserved (test_settings.TestPersistence.test_unknown_keys_are_preserved)
+不同版本之间来回切换时，旧版不认识的键不该被抹掉。 ... ok
+test_wrong_types_are_coerced (test_settings.TestPersistence.test_wrong_types_are_coerced) ... ok
+test_bool_spec_rejects_non_bool (test_settings.TestSchema.test_bool_spec_rejects_non_bool) ... ok
+test_choice_specs_validate_values (test_settings.TestSchema.test_choice_specs_validate_values) ... ok
+test_every_spec_has_a_field (test_settings.TestSchema.test_every_spec_has_a_field) ... ok
+test_keys_are_unique (test_settings.TestSchema.test_keys_are_unique) ... ok
+test_required_settings_exist (test_settings.TestSchema.test_required_settings_exist) ... ok
+test_spec_is_frozen (test_settings.TestSchema.test_spec_is_frozen) ... ok
 test_charge_is_non_decreasing_with_damage (test_tactics.TestEnemyDesign.test_charge_is_non_decreasing_with_damage)
 全表约束：攻击力更高的一方，蓄力回合不能反而更短。 ... ok
 test_required_enemy_types_exist (test_tactics.TestEnemyDesign.test_required_enemy_types_exist) ... ok
@@ -139,6 +213,6 @@ test_monster_roundtrip_keeps_charge (test_tactics.TestSaveCompatibility.test_mon
 test_player_roundtrip_keeps_equipment_slots (test_tactics.TestSaveCompatibility.test_player_roundtrip_keeps_equipment_slots) ... ok
 
 ----------------------------------------------------------------------
-Ran 89 tests in 0.270s
+Ran 153 tests in 0.347s
 
 OK
